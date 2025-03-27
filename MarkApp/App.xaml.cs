@@ -1,12 +1,13 @@
-﻿namespace MarkApp
-{
-    public partial class App : Application
-    {
-        public App()
-        {
-            InitializeComponent();
+﻿using Microsoft.Maui.Controls;
 
-            MainPage = new AppShell();
-        }
+namespace MarkApp;
+
+public partial class App : Application
+{
+    public App()
+    {
+        InitializeComponent();
+
+        MainPage = new NavigationPage(new MainPage());
     }
 }
