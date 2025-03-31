@@ -59,7 +59,7 @@ namespace MarkApp
         {
             // Переключение режима рисования
             //PhotoEditor.IsDrawingMode = !PhotoEditor.IsDrawingMode;
-            
+
         }
     }
 }

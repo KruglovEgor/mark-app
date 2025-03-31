@@ -76,5 +76,4 @@ public static class MauiProgram
             Debug.WriteLine($"Стек-трейс внутренней ошибки: {ex.InnerException.StackTrace}");
         }
     }
-
 }
