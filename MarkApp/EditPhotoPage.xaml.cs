@@ -1,14 +1,30 @@
 ﻿using Microsoft.Maui.Controls;
+using Syncfusion.Maui.Core;
 using Syncfusion.Maui.ImageEditor;
 
 namespace MarkApp
 {
     public partial class EditPhotoPage : ContentPage
     {
+        private bool isCircleMode = false;
+
         public EditPhotoPage(FileResult photoFile)
         {
             InitializeComponent();
             LoadImage(photoFile);
+
+            // Configure the toolbar
+            ConfigureImageEditor();
+        }
+
+        private void ConfigureImageEditor()
+        {
+            // Toolbar configuration
+            if (PhotoEditor.ToolbarSettings != null)
+            {
+                // Make sure shapes are visible in the toolbar
+                //PhotoEditor.ToolbarSettings.ToolbarItemVisibility.Shape = true;
+            }
         }
 
         private async void LoadImage(FileResult photoFile)
@@ -43,6 +59,7 @@ namespace MarkApp
                 }
 
                 await DisplayAlert("Сохранение", "Изображение сохранено", "ОК");
+                await Navigation.PopAsync();
             }
             catch (Exception ex)
             {
@@ -57,9 +74,67 @@ namespace MarkApp
 
         private void OnMarkPointsClicked(object sender, EventArgs e)
         {
-            // Переключение режима рисования
-            //PhotoEditor.IsDrawingMode = !PhotoEditor.IsDrawingMode;
+            isCircleMode = !isCircleMode;
+            var btn = sender as Button;
 
+            if (isCircleMode)
+            {
+                btn.Text = "Выключить режим меток";
+
+                // Add a circle directly
+                AddCircle();
+
+                // Show the toolbar to edit shapes
+                if (PhotoEditor.ToolbarSettings != null)
+                {
+                    //PhotoEditor.ToolbarSettings.IsVisible = true;
+                }
+            }
+            else
+            {
+                btn.Text = "Добавить метку";
+
+                // Hide the toolbar
+                if (PhotoEditor.ToolbarSettings != null)
+                {
+                    //PhotoEditor.ToolbarSettings.IsVisible = false;
+                }
+            }
+        }
+
+        private void AddCircle()
+        {
+            try
+            {
+                // This is the method that should work with Syncfusion SfImageEditor
+                // Get the center point of the editor
+                double centerX = PhotoEditor.Width / 2;
+                double centerY = PhotoEditor.Height / 2;
+
+                // Create circle shape settings
+                ImageEditorShapeSettings circleSettings = new ImageEditorShapeSettings
+                {
+                    Color = Colors.Red,
+                    StrokeThickness = 3,
+                    IsFilled = true,
+                };
+
+                // Add the circle shape at the center
+                PhotoEditor.AddShape(AnnotationShape.Circle, circleSettings);
+
+                // Display success message
+                MainThread.BeginInvokeOnMainThread(async () =>
+                {
+                    await DisplayAlert("Успех", "Метка добавлена. Используйте инструменты редактора для перемещения и изменения размера.", "OK");
+                });
+            }
+            catch (Exception ex)
+            {
+                MainThread.BeginInvokeOnMainThread(async () =>
+                {
+                    await DisplayAlert("Ошибка", $"Не удалось добавить метку: {ex.Message}", "OK");
+                });
+            }
         }
     }
 }

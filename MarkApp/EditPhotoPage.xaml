@@ -6,9 +6,35 @@
              Title="Редактирование фото">
 
     <Grid>
-        <syncfusion:SfImageEditor x:Name="PhotoEditor"
-                                  VerticalOptions="Fill"
-                                  HorizontalOptions="Fill"/>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
+        <syncfusion:SfImageEditor x:Name="PhotoEditor"
+                                 Grid.Row="0"
+                                 VerticalOptions="Fill"
+                                 HorizontalOptions="Fill"/>
+
+        <HorizontalStackLayout Grid.Row="1" 
+                              Spacing="10" 
+                              Padding="10"
+                              HorizontalOptions="Center">
+            <Button Text="Добавить метку" 
+                    Clicked="OnMarkPointsClicked"
+                    WidthRequest="150"
+                    HeightRequest="50"
+                    Margin="5"/>
+            <Button Text="Сохранить" 
+                    Clicked="OnSaveClicked"
+                    WidthRequest="100"
+                    HeightRequest="50"
+                    Margin="5"/>
+            <Button Text="Отмена" 
+                    Clicked="OnCancelClicked"
+                    WidthRequest="100"
+                    HeightRequest="50"
+                    Margin="5"/>
+        </HorizontalStackLayout>
     </Grid>
 </ContentPage>
