@@ -12,60 +12,45 @@ namespace MarkApp
     {
         private bool isMarkMode = false;
         private int currentMarkNumber = 0;
-        private Dictionary<int, int> markCircles = new Dictionary<int, int>();
-        private Dictionary<int, int> markLabels = new Dictionary<int, int>();
+        private bool waitingForSecondTap = false;
+        private Point firstTapLocation;
 
-        public EditPhotoPage(FileResult photoFile)
+        // Держим размеры редактора и изображения для вычисления координат
+        private double editorWidth, editorHeight;
+
+        public EditPhotoPage()
         {
             InitializeComponent();
-            LoadImage(photoFile);
-        }
 
-        private async void LoadImage(FileResult photoFile)
+            // Подписываемся на событие загрузки изображения для получения его размеров
+            PhotoEditor.Loaded += (s, e) => {
+                editorWidth = PhotoEditor.Width;
+                editorHeight = PhotoEditor.Height;
+            };
+
+            // Инициализация оверлея
+            var tapGestureRecognizer = new TapGestureRecognizer();
+            tapGestureRecognizer.Tapped += OnImageTapped;
+            // TODO: разобраться почему при включении перестает работать выбор картинки
+            //tapOverlay.GestureRecognizers.Add(tapGestureRecognizer);
+
+            // Убедимся, что оверлей правильно реагирует на касания
+            //tapOverlay.IsEnabled = true;
+            //tapOverlay.InputTransparent = true; // По умолчанию касания проходят
+        }
+        private async void OnPickPhotoClicked(object sender, EventArgs e)
         {
-            try
+            var result = await FilePicker.PickAsync(new PickOptions
             {
-                var stream = await photoFile.OpenReadAsync();
-                PhotoEditor.Source = ImageSource.FromStream(() => stream);
-            }
-            catch (Exception ex)
+                FileTypes = FilePickerFileType.Images
+            });
+
+            if (result != null)
             {
-                await DisplayAlert("Ошибка", $"Не удалось загрузить фото: {ex.Message}", "OK");
-            }
-        }
-
-        private async void OnSaveClicked(object sender, EventArgs e)
-        {
-            try
-            {
-                // Получаем текущее изображение
-                var imageStream = await PhotoEditor.GetImageStream();
-
-                // Генерируем уникальное имя файла
-                string fileName = $"edited_image_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-
-                // Сохраняем файл в галерею
-                var path = Path.Combine(Microsoft.Maui.Storage.FileSystem.AppDataDirectory, fileName);
-
-                using (var fileStream = File.Create(path))
-                {
-                    await imageStream.CopyToAsync(fileStream);
-                }
-
-                await DisplayAlert("Сохранение", "Изображение сохранено", "ОК");
-                await Navigation.PopAsync();
-            }
-            catch (Exception ex)
-            {
-                await DisplayAlert("Ошибка", $"Не удалось сохранить фото: {ex.Message}", "OK");
+                using var stream = await result.OpenReadAsync();
+                
             }
         }
-
-        private async void OnCancelClicked(object sender, EventArgs e)
-        {
-            await Navigation.PopAsync();
-        }
-
         private void OnMarkPointsClicked(object sender, EventArgs e)
         {
             isMarkMode = !isMarkMode;
@@ -74,61 +59,104 @@ namespace MarkApp
             if (isMarkMode)
             {
                 btn.Text = "Выключить режим меток";
+                waitingForSecondTap = false;
 
-                // Добавляем метку по центру
-                double centerX = PhotoEditor.Width / 2;
-                double centerY = PhotoEditor.Height / 2;
-                AddMarkAt(centerX, centerY);
+                // Активируем оверлей для перехвата тапов
+                //tapOverlay.InputTransparent = false;
             }
             else
             {
                 btn.Text = "Включить режим меток";
+                waitingForSecondTap = false;
+
+                // Деактивируем оверлей, чтобы касания проходили к редактору
+                //tapOverlay.InputTransparent = true;
             }
         }
 
-        // Метод для добавления метки в указанную позицию
-        private void AddMarkAt(double x, double y)
+        private void OnImageTapped(object sender, TappedEventArgs e)
+        {
+            if (!isMarkMode) return;
+
+            // Получаем координаты касания относительно оверлея
+            var point = e.GetPosition((View)sender);
+            if (point == null) return;
+
+            // Преобразуем координаты с учетом масштабирования и позиционирования изображения
+            var imagePoint = CalculateImageCoordinates(point.Value);
+
+            if (!waitingForSecondTap)
+            {
+                // Первое касание - добавляем круг
+                firstTapLocation = imagePoint;
+                AddCircleAt(imagePoint);
+                waitingForSecondTap = true;
+            }
+            else
+            {
+                // Второе касание - добавляем текст
+                AddLabelAt(imagePoint);
+                waitingForSecondTap = false;
+            }
+        }
+
+        private Point CalculateImageCoordinates(Point tapPoint)
+        {
+            double relativeX = tapPoint.X / PhotoEditor.Width;
+            double relativeY = tapPoint.Y / PhotoEditor.Height;
+            return new Point(relativeX * PhotoEditor.Width, relativeY * PhotoEditor.Height);
+        }
+
+        private void AddCircleAt(Point point)
         {
             try
             {
-                // Увеличиваем счетчик меток
-                currentMarkNumber++;
-
-                // 1. Добавляем круг (точку)
-                // Используем доступные методы API Syncfusion
-                ImageEditorShapeSettings circleSettings = new ImageEditorShapeSettings
+                var circleSettings = new ImageEditorShapeSettings
                 {
                     Color = Colors.Red,
                     StrokeThickness = 3,
                     IsFilled = true,
+                    Bounds = new Rect(point.X - 10, point.Y - 10, 20, 20)
                 };
+
                 PhotoEditor.AddShape(AnnotationShape.Circle, circleSettings);
-
-                // 2. Добавляем метку с номером
-                PhotoEditor.AddText(currentMarkNumber.ToString());
-
-                // Показываем сообщение
+            }
+            catch (Exception ex)
+            {
                 Microsoft.Maui.ApplicationModel.MainThread.BeginInvokeOnMainThread(async () =>
                 {
-                    await DisplayAlert("Успешно", $"Добавлена метка #{currentMarkNumber}. Используйте инструменты редактора для изменения положения и размера.", "OK");
+                    await DisplayAlert("Ошибка", $"Не удалось добавить круг: {ex.Message}", "OK");
+                });
+            }
+        }
+
+        private void AddLabelAt(Point point)
+        {
+            try
+            {
+                currentMarkNumber++;
+
+                var textSettings = new ImageEditorTextSettings
+                {
+                    TextAlignment = TextAlignment.Center,
+                    Background = Colors.Black,
+                    Bounds = new Rect(point.X - 12, point.Y - 12, 24, 24)
+                };
+
+                PhotoEditor.AddText(currentMarkNumber.ToString(), textSettings);
+
+                Microsoft.Maui.ApplicationModel.MainThread.BeginInvokeOnMainThread(async () =>
+                {
+                    await DisplayAlert("Успешно", $"Метка #{currentMarkNumber} добавлена", "OK");
                 });
             }
             catch (Exception ex)
             {
                 Microsoft.Maui.ApplicationModel.MainThread.BeginInvokeOnMainThread(async () =>
                 {
-                    await DisplayAlert("Ошибка", $"Не удалось добавить метку: {ex.Message}", "OK");
+                    await DisplayAlert("Ошибка", $"Не удалось добавить текст: {ex.Message}", "OK");
                 });
             }
-        }
-
-        // Дополнительный метод для добавления метки по кнопке
-        private void OnAddMarkClicked(object sender, EventArgs e)
-        {
-            // Добавляем новую метку по центру экрана
-            double centerX = PhotoEditor.Width / 2;
-            double centerY = PhotoEditor.Height / 2;
-            AddMarkAt(centerX, centerY);
         }
     }
 }

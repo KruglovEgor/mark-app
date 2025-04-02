@@ -11,35 +11,24 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <syncfusion:SfImageEditor x:Name="PhotoEditor"
-                                 Grid.Row="0"
-                                 VerticalOptions="Fill"
-                                 HorizontalOptions="Fill"/>
+        <!-- Редактор и оверлей -->
+        <syncfusion:SfImageEditor x:Name="PhotoEditor" 
+                VerticalOptions="Fill" 
+                HorizontalOptions="Fill"/>
 
+        <Grid x:Name="tapOverlay" 
+            BackgroundColor="Transparent" 
+            InputTransparent="True"/>
+
+        <!-- Кнопки -->
         <HorizontalStackLayout Grid.Row="1" 
-                              Spacing="10" 
-                              Padding="10"
-                              HorizontalOptions="Center">
+                          Spacing="10" 
+                          Padding="10"
+                          HorizontalOptions="Center">
             <Button Text="Включить режим меток" 
-                    Clicked="OnMarkPointsClicked"
-                    WidthRequest="180"
-                    HeightRequest="50"
-                    Margin="5"/>
-            <Button Text="Добавить метку" 
-                    Clicked="OnAddMarkClicked"
-                    WidthRequest="130"
-                    HeightRequest="50"
-                    Margin="5"/>
-            <Button Text="Сохранить" 
-                    Clicked="OnSaveClicked"
-                    WidthRequest="100"
-                    HeightRequest="50"
-                    Margin="5"/>
-            <Button Text="Отмена" 
-                    Clicked="OnCancelClicked"
-                    WidthRequest="100"
-                    HeightRequest="50"
-                    Margin="5"/>
+                Clicked="OnMarkPointsClicked"
+                WidthRequest="180"
+                Margin="5"/>
         </HorizontalStackLayout>
     </Grid>
 </ContentPage>

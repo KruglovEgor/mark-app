@@ -1,5 +1,4 @@
 ﻿using Microsoft.Maui.Controls;
-using Microsoft.Maui.Storage;
 
 namespace MarkApp
 {
@@ -10,25 +9,10 @@ namespace MarkApp
             InitializeComponent();
         }
 
-        private async void OnPickPhotoClicked(object sender, EventArgs e)
+        private async void OnNavigateToEditPageClicked(object sender, EventArgs e)
         {
-            try
-            {
-                var result = await MediaPicker.PickPhotoAsync(new MediaPickerOptions
-                {
-                    Title = "Выберите фото"
-                });
-
-                if (result != null)
-                {
-                    // Открываем страницу редактирования
-                    await Navigation.PushAsync(new EditPhotoPage(result));
-                }
-            }
-            catch (Exception ex)
-            {
-                await DisplayAlert("Ошибка", $"Не удалось выбрать фото: {ex.Message}", "OK");
-            }
+            // Просто переходим на страницу редактора
+            await Navigation.PushAsync(new EditPhotoPage());
         }
     }
 }

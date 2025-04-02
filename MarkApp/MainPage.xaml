@@ -8,17 +8,12 @@
                              VerticalOptions="Center" 
                              HorizontalOptions="Center">
 
-            <Button x:Name="PickPhotoButton"
-                    Text="Выбрать фото из галереи"
-                    Clicked="OnPickPhotoClicked"
+            <Button x:Name="NavigateButton"
+                    Text="Перейти к редактору фото"
+                    Clicked="OnNavigateToEditPageClicked"
                     BackgroundColor="Blue"
                     TextColor="White"
                     WidthRequest="250"/>
-
-            <Image x:Name="SelectedImage"
-                   HeightRequest="300"
-                   WidthRequest="300"
-                   Aspect="AspectFit"/>
         </VerticalStackLayout>
     </Grid>
 
