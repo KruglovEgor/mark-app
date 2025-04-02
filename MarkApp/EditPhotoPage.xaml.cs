@@ -1,30 +1,24 @@
 ﻿using Microsoft.Maui.Controls;
-using Syncfusion.Maui.Core;
+using Microsoft.Maui.Graphics;
 using Syncfusion.Maui.ImageEditor;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using Microsoft.Maui;
 
 namespace MarkApp
 {
     public partial class EditPhotoPage : ContentPage
     {
-        private bool isCircleMode = false;
+        private bool isMarkMode = false;
+        private int currentMarkNumber = 0;
+        private Dictionary<int, int> markCircles = new Dictionary<int, int>();
+        private Dictionary<int, int> markLabels = new Dictionary<int, int>();
 
         public EditPhotoPage(FileResult photoFile)
         {
             InitializeComponent();
             LoadImage(photoFile);
-
-            // Configure the toolbar
-            ConfigureImageEditor();
-        }
-
-        private void ConfigureImageEditor()
-        {
-            // Toolbar configuration
-            if (PhotoEditor.ToolbarSettings != null)
-            {
-                // Make sure shapes are visible in the toolbar
-                //PhotoEditor.ToolbarSettings.ToolbarItemVisibility.Shape = true;
-            }
         }
 
         private async void LoadImage(FileResult photoFile)
@@ -51,7 +45,7 @@ namespace MarkApp
                 string fileName = $"edited_image_{DateTime.Now:yyyyMMdd_HHmmss}.png";
 
                 // Сохраняем файл в галерею
-                var path = Path.Combine(FileSystem.AppDataDirectory, fileName);
+                var path = Path.Combine(Microsoft.Maui.Storage.FileSystem.AppDataDirectory, fileName);
 
                 using (var fileStream = File.Create(path))
                 {
@@ -74,67 +68,67 @@ namespace MarkApp
 
         private void OnMarkPointsClicked(object sender, EventArgs e)
         {
-            isCircleMode = !isCircleMode;
+            isMarkMode = !isMarkMode;
             var btn = sender as Button;
 
-            if (isCircleMode)
+            if (isMarkMode)
             {
                 btn.Text = "Выключить режим меток";
 
-                // Add a circle directly
-                AddCircle();
-
-                // Show the toolbar to edit shapes
-                if (PhotoEditor.ToolbarSettings != null)
-                {
-                    //PhotoEditor.ToolbarSettings.IsVisible = true;
-                }
+                // Добавляем метку по центру
+                double centerX = PhotoEditor.Width / 2;
+                double centerY = PhotoEditor.Height / 2;
+                AddMarkAt(centerX, centerY);
             }
             else
             {
-                btn.Text = "Добавить метку";
-
-                // Hide the toolbar
-                if (PhotoEditor.ToolbarSettings != null)
-                {
-                    //PhotoEditor.ToolbarSettings.IsVisible = false;
-                }
+                btn.Text = "Включить режим меток";
             }
         }
 
-        private void AddCircle()
+        // Метод для добавления метки в указанную позицию
+        private void AddMarkAt(double x, double y)
         {
             try
             {
-                // This is the method that should work with Syncfusion SfImageEditor
-                // Get the center point of the editor
-                double centerX = PhotoEditor.Width / 2;
-                double centerY = PhotoEditor.Height / 2;
+                // Увеличиваем счетчик меток
+                currentMarkNumber++;
 
-                // Create circle shape settings
+                // 1. Добавляем круг (точку)
+                // Используем доступные методы API Syncfusion
                 ImageEditorShapeSettings circleSettings = new ImageEditorShapeSettings
                 {
                     Color = Colors.Red,
                     StrokeThickness = 3,
                     IsFilled = true,
                 };
-
-                // Add the circle shape at the center
                 PhotoEditor.AddShape(AnnotationShape.Circle, circleSettings);
 
-                // Display success message
-                MainThread.BeginInvokeOnMainThread(async () =>
+                // 2. Добавляем метку с номером
+                PhotoEditor.AddText(currentMarkNumber.ToString());
+
+                // Показываем сообщение
+                Microsoft.Maui.ApplicationModel.MainThread.BeginInvokeOnMainThread(async () =>
                 {
-                    await DisplayAlert("Успех", "Метка добавлена. Используйте инструменты редактора для перемещения и изменения размера.", "OK");
+                    await DisplayAlert("Успешно", $"Добавлена метка #{currentMarkNumber}. Используйте инструменты редактора для изменения положения и размера.", "OK");
                 });
             }
             catch (Exception ex)
             {
-                MainThread.BeginInvokeOnMainThread(async () =>
+                Microsoft.Maui.ApplicationModel.MainThread.BeginInvokeOnMainThread(async () =>
                 {
                     await DisplayAlert("Ошибка", $"Не удалось добавить метку: {ex.Message}", "OK");
                 });
             }
+        }
+
+        // Дополнительный метод для добавления метки по кнопке
+        private void OnAddMarkClicked(object sender, EventArgs e)
+        {
+            // Добавляем новую метку по центру экрана
+            double centerX = PhotoEditor.Width / 2;
+            double centerY = PhotoEditor.Height / 2;
+            AddMarkAt(centerX, centerY);
         }
     }
 }
