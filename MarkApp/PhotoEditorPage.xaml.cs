@@ -1,42 +1,22 @@
 using Microsoft.Maui.Controls;
-using Microsoft.Maui.Graphics;
+using Microsoft.Maui.Storage;
 using SkiaSharp;
 using SkiaSharp.Views.Maui;
 using SkiaSharp.Views.Maui.Controls;
-using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading.Tasks;
-using Point = Microsoft.Maui.Graphics.Point;
-using Color = Microsoft.Maui.Graphics.Color;
 
 namespace MarkApp
 {
     public partial class PhotoEditorPage : ContentPage
     {
-        // Настройки редактора
+        private SKBitmap loadedImage;
+        private SKMatrix matrix = SKMatrix.CreateIdentity();
         private bool isMarkMode = false;
-        private int currentMarkNumber = 0;
-        private SKBitmap? originalImage;
-        private SKBitmap? displayImage;
-
-        // Масштабирование и перемещение
-        private float scale = 1.0f;
-        private float minScale = 0.5f;
-        private float maxScale = 5.0f;
-        private SKPoint offset = new SKPoint(0, 0);
-        private SKPoint lastTouchPoint = new SKPoint(0, 0);
-        private bool isDragging = false;
-
-        // Маркеры
-        private class Marker
-        {
-            public SKPoint Position { get; set; }
-            public int Number { get; set; }
-        }
-
-        private List<Marker> markers = new List<Marker>();
+        private List<SKPoint> markPoints = new List<SKPoint>();
+        private List<List<SKPoint>> allMarks = new List<List<SKPoint>>();
+        private List<SKPoint> currentMark = new List<SKPoint>();
 
         public PhotoEditorPage()
         {
@@ -49,31 +29,29 @@ namespace MarkApp
             {
                 var result = await FilePicker.PickAsync(new PickOptions
                 {
-                    FileTypes = FilePickerFileType.Images
+                    FileTypes = FilePickerFileType.Images,
+                    PickerTitle = "Выберите фото"
                 });
 
-                if (result == null)
-                    return;
+                if (result != null)
+                {
+                    using (var stream = await result.OpenReadAsync())
+                    {
+                        // Загрузка изображения в SKBitmap
+                        loadedImage = SKBitmap.Decode(stream);
 
-                using var stream = await result.OpenReadAsync();
-                using var memoryStream = new MemoryStream();
-                await stream.CopyToAsync(memoryStream);
-                memoryStream.Position = 0;
+                        // Сбросить метки при загрузке нового изображения
+                        markPoints = new List<SKPoint>();
+                        allMarks = new List<List<SKPoint>>();
+                        currentMark = new List<SKPoint>();
 
-                // Загружаем изображение в SkiaSharp
-                originalImage = SKBitmap.Decode(memoryStream.ToArray());
+                        // Установить начальную матрицу для масштабирования изображения, чтобы оно корректно отображалось
+                        CalculateImageMatrix();
 
-                // Создаем копию для отображения с изменениями
-                displayImage = originalImage.Copy();
-
-                // Сбрасываем настройки масштабирования и маркеры
-                scale = 1.0f;
-                offset = new SKPoint(0, 0);
-                markers.Clear();
-                currentMarkNumber = 0;
-
-                // Обновляем канвас
-                canvasView.InvalidateSurface();
+                        // Вызвать перерисовку канваса
+                        canvasView.InvalidateSurface();
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -81,37 +59,155 @@ namespace MarkApp
             }
         }
 
-        private void OnMarkModeClicked(object sender, EventArgs e)
+        private void CalculateImageMatrix()
         {
-            if (originalImage == null)
+            if (loadedImage == null) return;
+
+            // Рассчитать соотношение сторон экрана и изображения
+            float canvasWidth = (float)canvasView.Width;
+            float canvasHeight = (float)canvasView.Height;
+            float imageWidth = loadedImage.Width;
+            float imageHeight = loadedImage.Height;
+
+            // Коэффициенты масштабирования для подгонки изображения под экран
+            float scaleX = canvasWidth / imageWidth;
+            float scaleY = canvasHeight / imageHeight;
+            float scale = Math.Min(scaleX, scaleY);
+
+            // Центрирование изображения
+            float translateX = (canvasWidth - (imageWidth * scale)) / 2;
+            float translateY = (canvasHeight - (imageHeight * scale)) / 2;
+
+            // Создание матрицы трансформации
+            matrix = SKMatrix.CreateScale(scale, scale);
+            matrix = matrix.PostConcat(SKMatrix.CreateTranslation(translateX, translateY));
+        }
+
+        private void OnCanvasViewPaintSurface(object sender, SKPaintSurfaceEventArgs e)
+        {
+            var canvas = e.Surface.Canvas;
+            canvas.Clear(SKColors.White);
+
+            if (loadedImage != null)
             {
-                DisplayAlert("Предупреждение", "Сначала выберите изображение", "OK");
-                return;
+                // Проверка инициализации матрицы
+                if (matrix.IsIdentity)
+                {
+                    CalculateImageMatrix();
+                }
+
+                // Сохраняем текущее состояние канваса
+                canvas.Save();
+                // Применяем матрицу трансформации к канвасу
+                canvas.SetMatrix(matrix);
+                // Отрисовка изображения в начальной позиции (0,0)
+                canvas.DrawBitmap(loadedImage, 0, 0);
+                // Восстанавливаем состояние канваса
+                canvas.Restore();
+
+                // Отрисовка всех сохраненных меток
+                using (var paint = new SKPaint
+                {
+                    Style = SKPaintStyle.Stroke,
+                    Color = SKColors.Red,
+                    StrokeWidth = 4,
+                    IsAntialias = true
+                })
+                {
+                    foreach (var mark in allMarks)
+                    {
+                        if (mark.Count >= 2)
+                        {
+                            using (var path = new SKPath())
+                            {
+                                path.MoveTo(mark[0]);
+                                for (int i = 1; i < mark.Count; i++)
+                                {
+                                    path.LineTo(mark[i]);
+                                }
+                                canvas.DrawPath(path, paint);
+                            }
+                        }
+                        else if (mark.Count == 1)
+                        {
+                            canvas.DrawCircle(mark[0], 5, paint);
+                        }
+                    }
+
+                    // Отрисовка текущей метки
+                    if (currentMark.Count >= 2)
+                    {
+                        using (var path = new SKPath())
+                        {
+                            path.MoveTo(currentMark[0]);
+                            for (int i = 1; i < currentMark.Count; i++)
+                            {
+                                path.LineTo(currentMark[i]);
+                            }
+                            canvas.DrawPath(path, paint);
+                        }
+                    }
+                    else if (currentMark.Count == 1)
+                    {
+                        canvas.DrawCircle(currentMark[0], 5, paint);
+                    }
+                }
+            }
+        }
+
+        private void OnCanvasViewTouch(object sender, SKTouchEventArgs e)
+        {
+            if (loadedImage == null || !isMarkMode) return;
+
+            switch (e.ActionType)
+            {
+                case SKTouchAction.Pressed:
+                    // Начало новой метки
+                    currentMark = new List<SKPoint> { e.Location };
+                    canvasView.InvalidateSurface();
+                    break;
+
+                case SKTouchAction.Moved:
+                    // Добавление точки к текущей метке
+                    if (currentMark.Count > 0)
+                    {
+                        currentMark.Add(e.Location);
+                        canvasView.InvalidateSurface();
+                    }
+                    break;
+
+                case SKTouchAction.Released:
+                    // Завершение метки
+                    if (currentMark.Count > 0)
+                    {
+                        allMarks.Add(new List<SKPoint>(currentMark));
+                        currentMark.Clear();
+                        canvasView.InvalidateSurface();
+                    }
+                    break;
             }
 
+            e.Handled = true;
+        }
+
+        private void OnMarkModeClicked(object sender, EventArgs e)
+        {
             isMarkMode = !isMarkMode;
-            markModeButton.Text = isMarkMode ? "Выключить метки" : "Режим меток";
+            markModeButton.Text = isMarkMode ? "Просмотр" : "Метки";
         }
 
         private void OnUndoClicked(object sender, EventArgs e)
         {
-            if (markers.Count > 0)
+            if (allMarks.Count > 0)
             {
-                markers.RemoveAt(markers.Count - 1);
-
-                // Если удалили последнюю метку, уменьшаем счетчик
-                if (currentMarkNumber > 0)
-                    currentMarkNumber--;
-
-                // Перерисовываем
-                RedrawImage();
+                allMarks.RemoveAt(allMarks.Count - 1);
                 canvasView.InvalidateSurface();
             }
         }
 
         private async void OnSavePhotoClicked(object sender, EventArgs e)
         {
-            if (displayImage == null)
+            if (loadedImage == null)
             {
                 await DisplayAlert("Предупреждение", "Нет изображения для сохранения", "OK");
                 return;
@@ -119,42 +215,72 @@ namespace MarkApp
 
             try
             {
-                // Получаем путь для сохранения
-                string fileName = $"marked_photo_{DateTime.Now:yyyyMMdd_HHmmss}.jpg";
-                string filePath = Path.Combine(FileSystem.CacheDirectory, fileName);
-
-                // Сохраняем изображение с маркерами
-                using (var outputStream = File.OpenWrite(filePath))
+                // Создание нового изображения с метками
+                var info = new SKImageInfo(loadedImage.Width, loadedImage.Height);
+                using (var surface = SKSurface.Create(info))
                 {
-                    // Создаем финальное изображение в оригинальном размере с метками
-                    using (var finalImage = new SKBitmap(originalImage.Width, originalImage.Height))
-                    {
-                        using (var canvas = new SKCanvas(finalImage))
-                        {
-                            // Рисуем оригинал
-                            canvas.DrawBitmap(originalImage, 0, 0);
+                    var canvas = surface.Canvas;
+                    canvas.Clear(SKColors.White);
+                    canvas.DrawBitmap(loadedImage, 0, 0);
 
-                            // Рисуем все маркеры
-                            DrawMarkersOnCanvas(canvas, 1.0f, new SKPoint(0, 0));
+                    // Обратное преобразование координат меток из экранных в координаты изображения
+                    var invertedMatrix = new SKMatrix();
+                    if (matrix.TryInvert(out invertedMatrix))
+                    {
+                        // Отрисовка всех меток на изображении
+                        using (var paint = new SKPaint
+                        {
+                            Style = SKPaintStyle.Stroke,
+                            Color = SKColors.Red,
+                            StrokeWidth = 2,
+                            IsAntialias = true
+                        })
+                        {
+                            foreach (var mark in allMarks)
+                            {
+                                if (mark.Count >= 2)
+                                {
+                                    using (var path = new SKPath())
+                                    {
+                                        // Преобразование экранных координат в координаты изображения
+                                        var imagePoint = invertedMatrix.MapPoint(mark[0]);
+                                        path.MoveTo(imagePoint);
+
+                                        for (int i = 1; i < mark.Count; i++)
+                                        {
+                                            imagePoint = invertedMatrix.MapPoint(mark[i]);
+                                            path.LineTo(imagePoint);
+                                        }
+                                        canvas.DrawPath(path, paint);
+                                    }
+                                }
+                                else if (mark.Count == 1)
+                                {
+                                    var imagePoint = invertedMatrix.MapPoint(mark[0]);
+                                    canvas.DrawCircle(imagePoint, 3, paint);
+                                }
+                            }
+                        }
+                    }
+
+                    // Получение изображения из поверхности
+                    using (var image = surface.Snapshot())
+                    using (var data = image.Encode(SKEncodedImageFormat.Png, 100))
+                    {
+                        // Сохранение в файл
+                        var filePath = Path.Combine(FileSystem.CacheDirectory, $"MarkedImage_{DateTime.Now.Ticks}.png");
+                        using (var fs = File.OpenWrite(filePath))
+                        {
+                            data.SaveTo(fs);
                         }
 
-                        // Сохраняем в JPEG
-                        finalImage.Encode(SKEncodedImageFormat.Jpeg, 95).SaveTo(outputStream);
+                        // Копирование в галерею
+                        await Share.RequestAsync(new ShareFileRequest
+                        {
+                            Title = "Сохранить отмеченное фото",
+                            File = new ShareFile(filePath)
+                        });
                     }
-                }
-
-                // Показываем сообщение об успехе с возможностью поделиться
-                bool share = await DisplayAlert("Успешно",
-                    $"Изображение сохранено по пути:\n{filePath}",
-                    "Поделиться", "OK");
-
-                if (share)
-                {
-                    await Share.RequestAsync(new ShareFileRequest
-                    {
-                        Title = "Поделиться фото с метками",
-                        File = new ShareFile(filePath)
-                    });
                 }
             }
             catch (Exception ex)
@@ -163,246 +289,16 @@ namespace MarkApp
             }
         }
 
-        private void OnCanvasViewPaintSurface(object sender, SKPaintSurfaceEventArgs e)
+        protected override void OnSizeAllocated(double width, double height)
         {
-            SKCanvas canvas = e.Surface.Canvas;
+            base.OnSizeAllocated(width, height);
 
-            // Очищаем канвас
-            canvas.Clear(SKColors.LightGray);
-
-            if (displayImage == null)
-                return;
-
-            // Получаем размеры канваса и изображения
-            var canvasSize = e.Info.Size;
-
-            // Вычисляем масштаб для правильного отображения
-            float imageAspect = (float)displayImage.Width / displayImage.Height;
-            float canvasAspect = canvasSize.Width / canvasSize.Height;
-
-            float scaleX, scaleY;
-            SKRect destRect;
-
-            if (imageAspect > canvasAspect)
+            // Пересчитывать матрицу при изменении размера экрана
+            if (loadedImage != null && width > 0 && height > 0)
             {
-                // Изображение шире канваса, масштабируем по ширине
-                scaleX = scaleY = canvasSize.Width / displayImage.Width;
-                float scaledHeight = displayImage.Height * scaleX;
-                destRect = new SKRect(0, (canvasSize.Height - scaledHeight) / 2,
-                                     canvasSize.Width, (canvasSize.Height + scaledHeight) / 2);
-            }
-            else
-            {
-                // Изображение выше канваса, масштабируем по высоте
-                scaleX = scaleY = canvasSize.Height / displayImage.Height;
-                float scaledWidth = displayImage.Width * scaleY;
-                destRect = new SKRect((canvasSize.Width - scaledWidth) / 2, 0,
-                                     (canvasSize.Width + scaledWidth) / 2, canvasSize.Height);
-            }
-
-            // Применяем масштаб и смещение от пользователя
-            SKMatrix matrix = SKMatrix.CreateScale(scale, scale);
-            SKPoint center = new SKPoint(canvasSize.Width / 2, canvasSize.Height / 2);
-            matrix = matrix.PostConcat(SKMatrix.CreateTranslation(-center.X, -center.Y));
-            matrix = matrix.PostConcat(SKMatrix.CreateTranslation(center.X + offset.X, center.Y + offset.Y));
-
-            canvas.SetMatrix(matrix);
-
-            // Рисуем изображение
-            canvas.DrawBitmap(displayImage, destRect);
-
-            // Рисуем маркеры
-            DrawMarkersOnCanvas(canvas, scaleX, new SKPoint(destRect.Left, destRect.Top));
-
-            // Сбрасываем матрицу трансформации
-            canvas.ResetMatrix();
-        }
-
-        private void DrawMarkersOnCanvas(SKCanvas canvas, float imageScale, SKPoint imageOffset)
-        {
-            if (markers.Count == 0)
-                return;
-
-            // Настройки для маркеров
-            float circleRadius = 15 / imageScale;
-
-            // Кисти для рисования
-            using (var circlePaint = new SKPaint
-            {
-                Style = SKPaintStyle.Fill,
-                Color = new SKColor(255, 0, 0, 180),
-                IsAntialias = true
-            })
-            using (var strokePaint = new SKPaint
-            {
-                Style = SKPaintStyle.Stroke,
-                Color = SKColors.White,
-                StrokeWidth = 2 / imageScale,
-                IsAntialias = true
-            })
-            using (var textPaint = new SKPaint
-            {
-                Color = SKColors.White,
-                TextSize = 12 / imageScale,
-                IsAntialias = true,
-                TextAlign = SKTextAlign.Center
-            })
-            {
-                foreach (var marker in markers)
-                {
-                    // Позиция маркера с учетом смещения изображения
-                    SKPoint position = new SKPoint(
-                        imageOffset.X + marker.Position.X,
-                        imageOffset.Y + marker.Position.Y
-                    );
-
-                    // Рисуем круг
-                    canvas.DrawCircle(position, circleRadius, circlePaint);
-                    canvas.DrawCircle(position, circleRadius, strokePaint);
-
-                    // Рисуем номер
-                    canvas.DrawText(marker.Number.ToString(),
-                                   position.X,
-                                   position.Y + textPaint.TextSize / 3, // Выравнивание по вертикали
-                                   textPaint);
-                }
-            }
-        }
-
-        private void OnCanvasViewTouch(object sender, SKTouchEventArgs e)
-        {
-            switch (e.ActionType)
-            {
-                case SKTouchAction.Pressed:
-                    // Запоминаем точку нажатия
-                    lastTouchPoint = e.Location;
-
-                    if (isMarkMode && !e.InContact)
-                    {
-                        // Добавляем маркер только если в режиме меток и не используется стилус
-                        AddMarker(e.Location);
-                    }
-                    else
-                    {
-                        // Начинаем перемещение
-                        isDragging = true;
-                    }
-                    break;
-
-                case SKTouchAction.Moved:
-                    if (isDragging)
-                    {
-                        // Перемещение изображения
-                        offset = new SKPoint(
-                            offset.X + (e.Location.X - lastTouchPoint.X) / scale,
-                            offset.Y + (e.Location.Y - lastTouchPoint.Y) / scale
-                        );
-                        lastTouchPoint = e.Location;
-                        canvasView.InvalidateSurface();
-                    }
-                    break;
-
-                case SKTouchAction.Released:
-                    isDragging = false;
-                    break;
-
-                case SKTouchAction.WheelChanged:
-                    // Масштабирование при прокрутке колесика мыши
-                    float newScale = scale * (float)Math.Pow(2, -e.WheelDelta / 10.0f);
-                    scale = Math.Clamp(newScale, minScale, maxScale);
-                    canvasView.InvalidateSurface();
-                    break;
-            }
-
-            // Помечаем событие как обработанное
-            e.Handled = true;
-        }
-
-        private void AddMarker(SKPoint touchPoint)
-        {
-            if (originalImage == null || displayImage == null)
-                return;
-
-            try
-            {
-                // Получаем размеры изображения на экране
-                var canvasSize = canvasView.CanvasSize;
-                float imageAspect = (float)displayImage.Width / displayImage.Height;
-                float canvasAspect = canvasSize.Width / canvasSize.Height;
-
-                SKRect destRect;
-                float scaleX, scaleY;
-
-                if (imageAspect > canvasAspect)
-                {
-                    scaleX = scaleY = canvasSize.Width / displayImage.Width;
-                    float scaledHeight = displayImage.Height * scaleX;
-                    destRect = new SKRect(0, (canvasSize.Height - scaledHeight) / 2,
-                                         canvasSize.Width, (canvasSize.Height + scaledHeight) / 2);
-                }
-                else
-                {
-                    scaleX = scaleY = canvasSize.Height / displayImage.Height;
-                    float scaledWidth = displayImage.Width * scaleY;
-                    destRect = new SKRect((canvasSize.Width - scaledWidth) / 2, 0,
-                                         (canvasSize.Width + scaledWidth) / 2, canvasSize.Height);
-                }
-
-                // Учитываем текущий масштаб и смещение пользователя
-                SKMatrix matrix = SKMatrix.CreateScale(scale, scale);
-                SKPoint center = new SKPoint(canvasSize.Width / 2, canvasSize.Height / 2);
-                matrix = matrix.PostConcat(SKMatrix.CreateTranslation(-center.X, -center.Y));
-                matrix = matrix.PostConcat(SKMatrix.CreateTranslation(center.X + offset.X, center.Y + offset.Y));
-
-                // Инвертируем матрицу для получения координат в исходном пространстве
-                SKMatrix inverseMatrix;
-                if (!matrix.TryInvert(out inverseMatrix))
-                    return;
-
-                // Преобразуем точку касания в координаты оригинального пространства
-                SKPoint originalTouchPoint = inverseMatrix.MapPoint(touchPoint);
-
-                // Проверяем, что точка находится в пределах изображения
-                if (!destRect.Contains(originalTouchPoint))
-                    return;
-
-                // Преобразуем координаты в координаты изображения
-                float imageX = (originalTouchPoint.X - destRect.Left) / destRect.Width * displayImage.Width;
-                float imageY = (originalTouchPoint.Y - destRect.Top) / destRect.Height * displayImage.Height;
-
-                // Увеличиваем счетчик маркеров
-                currentMarkNumber++;
-
-                // Создаем новый маркер
-                Marker newMarker = new Marker
-                {
-                    Position = new SKPoint(imageX, imageY),
-                    Number = currentMarkNumber
-                };
-
-                // Добавляем маркер в список
-                markers.Add(newMarker);
-
-                // Перерисовываем изображение с маркерами
-                RedrawImage();
+                CalculateImageMatrix();
                 canvasView.InvalidateSurface();
             }
-            catch (Exception ex)
-            {
-                MainThread.BeginInvokeOnMainThread(async () =>
-                {
-                    await DisplayAlert("Ошибка", $"Не удалось добавить метку: {ex.Message}", "OK");
-                });
-            }
-        }
-
-        private void RedrawImage()
-        {
-            if (originalImage == null)
-                return;
-
-            // Создаем новую копию оригинального изображения
-            displayImage = originalImage.Copy();
         }
     }
 }

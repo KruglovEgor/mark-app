@@ -31,7 +31,7 @@
                     Clicked="OnPickPhotoClicked"
                     Margin="5"/>
 
-            <Button Text="Режим меток" 
+            <Button Text="Метки" 
                     Grid.Column="1"
                     x:Name="markModeButton"
                     Clicked="OnMarkModeClicked"
