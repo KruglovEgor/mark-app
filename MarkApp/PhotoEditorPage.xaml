@@ -29,7 +29,11 @@
             <skia:SKCanvasView x:Name="canvasView"
                              PaintSurface="OnCanvasViewPaintSurface"
                              EnableTouchEvents="True"
-                             Touch="OnCanvasViewTouch" />
+                             Touch="OnCanvasViewTouch">
+                <skia:SKCanvasView.GestureRecognizers>
+                    <PinchGestureRecognizer PinchUpdated="OnPinchUpdated" />
+                </skia:SKCanvasView.GestureRecognizers>
+            </skia:SKCanvasView>
             
             <!-- Индикатор загрузки -->
             <ActivityIndicator x:Name="loadingIndicator" 

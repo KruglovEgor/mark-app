@@ -27,24 +27,23 @@ namespace MarkApp
         // Состояние жестов
         private bool isPanning = false;
         private bool isScaling = false;
-        private float pinchStartDistance = 0;
-        private float startScale = 1.0f;
+        private float pinchStartScale = 1.0f;
+        private SKPoint pinchCenter;
 
         // Режимы работы
         private bool isMarkMode = false;
-        private bool isWaitingForSecondTap = false;
         private int currentMarkNumber = 1;
 
         // Структура для хранения метки с кружком и номером
+        // Изменено: позиция хранится в координатах фотографии, а не экрана
         private class Mark
         {
-            public SKPoint Position { get; set; }
+            public SKPoint PhotoPosition { get; set; }  // Позиция в координатах фотографии
             public int Number { get; set; }
         }
 
         // История действий для отмены
         private List<Mark> marks = new List<Mark>();
-        private SKPoint pendingMarkPosition;
 
         public PhotoEditorPage()
         {
@@ -57,7 +56,7 @@ namespace MarkApp
         {
             try
             {
-                noPhotoLabel .IsVisible = false;
+                noPhotoLabel.IsVisible = false;
                 loadingIndicator.IsVisible = true;
                 loadingIndicator.IsRunning = true;
 
@@ -77,7 +76,6 @@ namespace MarkApp
                         // Сброс настроек при загрузке нового изображения
                         marks.Clear();
                         currentMarkNumber = 1;
-                        isWaitingForSecondTap = false;
                         isMarkMode = false;
                         toggleMarkModeButton.Text = "Режим меток";
 
@@ -112,8 +110,8 @@ namespace MarkApp
             float photoHeight = photo.Height;
 
             // Вычисление масштаба для вписывания фото на экран с некоторым отступом
-            float scaleX = canvasWidth * 0.9f / photoWidth;
-            float scaleY = canvasHeight * 0.9f / photoHeight;
+            float scaleX = canvasWidth * 0.95f / photoWidth;
+            float scaleY = canvasHeight * 0.95f / photoHeight;
             scale = Math.Min(scaleX, scaleY);
             scale = Math.Max(minScale, Math.Min(maxScale, scale));
 
@@ -153,15 +151,15 @@ namespace MarkApp
                 using (var surface = SKSurface.Create(info))
                 {
                     var canvas = surface.Canvas;
-                    canvas.Clear(SKColors.White);
+                    canvas.Clear(); // Не используем белый цвет, чтобы не влиять на яркость
                     canvas.DrawBitmap(photo, 0, 0);
 
                     // Отрисовка меток на изображении
                     DrawMarksToCanvas(canvas, true);
 
-                    // Создание и сохранение изображения
+                    // Создание и сохранение изображения с максимальным качеством
                     using (var image = surface.Snapshot())
-                    using (var data = image.Encode(SKEncodedImageFormat.Jpeg, 90))
+                    using (var data = image.Encode(SKEncodedImageFormat.Jpeg, 100))
                     {
                         // Путь для сохранения в кэш директорию
                         var filePath = Path.Combine(FileSystem.CacheDirectory, $"MarkedPhoto_{DateTime.Now:yyyyMMdd_HHmmss}.jpg");
@@ -206,15 +204,15 @@ namespace MarkApp
                 using (var surface = SKSurface.Create(info))
                 {
                     var canvas = surface.Canvas;
-                    canvas.Clear(SKColors.White);
+                    canvas.Clear(); // Без белого цвета
                     canvas.DrawBitmap(photo, 0, 0);
 
                     // Отрисовка меток на изображении
                     DrawMarksToCanvas(canvas, true);
 
-                    // Создание и сохранение временного файла для шаринга
+                    // Создание и сохранение временного файла для шаринга с максимальным качеством
                     using (var image = surface.Snapshot())
-                    using (var data = image.Encode(SKEncodedImageFormat.Jpeg, 90))
+                    using (var data = image.Encode(SKEncodedImageFormat.Jpeg, 100))
                     {
                         var filePath = Path.Combine(FileSystem.CacheDirectory, $"SharedPhoto_{DateTime.Now:yyyyMMdd_HHmmss}.jpg");
                         using (var fs = File.OpenWrite(filePath))
@@ -270,32 +268,6 @@ namespace MarkApp
 
             // Отрисовка меток
             DrawMarksToCanvas(canvas, false);
-
-            // Отрисовка ожидаемой метки (если ждем второе касание для номера)
-            if (isWaitingForSecondTap)
-            {
-                // Рисуем кружок в позиции первого касания
-                using (var paint = new SKPaint
-                {
-                    Style = SKPaintStyle.Fill,
-                    Color = new SKColor(255, 0, 0, 128), // Полупрозрачный красный
-                    IsAntialias = true
-                })
-                {
-                    canvas.DrawCircle(pendingMarkPosition, 30, paint);
-                }
-
-                using (var paint = new SKPaint
-                {
-                    Style = SKPaintStyle.Stroke,
-                    Color = SKColors.Red,
-                    StrokeWidth = 4,
-                    IsAntialias = true
-                })
-                {
-                    canvas.DrawCircle(pendingMarkPosition, 30, paint);
-                }
-            }
         }
 
         private void DrawMarksToCanvas(SKCanvas canvas, bool forExport)
@@ -304,15 +276,21 @@ namespace MarkApp
             float circleRadius = forExport ? 40 : 30;
             float textSize = forExport ? 40 : 24;
 
-            // Если экспортируем изображение, не применяем матрицу трансформации
-            // Т.к. координаты уже преобразованы в координаты исходной фотографии
-            SKMatrix matrix = forExport ? SKMatrix.CreateIdentity() : transformMatrix;
-
             foreach (var mark in marks)
             {
-                SKPoint position = forExport ?
-                    ConvertToPhotoCoordinates(mark.Position) :
-                    mark.Position;
+                // Получаем позицию метки
+                SKPoint position;
+
+                if (forExport)
+                {
+                    // Для экспорта используем координаты фотографии напрямую
+                    position = mark.PhotoPosition;
+                }
+                else
+                {
+                    // Для отображения на экране преобразуем координаты фото в экранные
+                    position = transformMatrix.MapPoint(mark.PhotoPosition);
+                }
 
                 // Рисуем кружок
                 using (var paint = new SKPaint
@@ -348,7 +326,7 @@ namespace MarkApp
                 {
                     canvas.DrawText(mark.Number.ToString(),
                                     position.X,
-                                    position.Y + (textSize / 3), // Небольшая корректировка для вертикального центрирования
+                                    position.Y + (textSize / 3), // Корректировка для вертикального центрирования
                                     paint);
                 }
             }
@@ -362,12 +340,16 @@ namespace MarkApp
                 return viewPoint;
 
             SKPoint photoPoint = invertedMatrix.MapPoint(viewPoint);
-
-            // Ограничиваем координаты в пределах фото
-            photoPoint.X = Math.Max(0, Math.Min(photo.Width, photoPoint.X));
-            photoPoint.Y = Math.Max(0, Math.Min(photo.Height, photoPoint.Y));
-
             return photoPoint;
+        }
+
+        // Проверяем, находится ли точка в пределах фотографии
+        private bool IsPointInsidePhoto(SKPoint photoPoint)
+        {
+            if (photo == null) return false;
+
+            return photoPoint.X >= 0 && photoPoint.X < photo.Width &&
+                   photoPoint.Y >= 0 && photoPoint.Y < photo.Height;
         }
 
         private void OnCanvasViewTouch(object sender, SKTouchEventArgs e)
@@ -394,23 +376,18 @@ namespace MarkApp
         {
             if (e.ActionType == SKTouchAction.Released)
             {
-                if (!isWaitingForSecondTap)
+                // Преобразуем координаты касания в координаты фото
+                SKPoint photoPoint = ConvertToPhotoCoordinates(e.Location);
+
+                // Проверяем, находится ли точка в пределах фотографии
+                if (IsPointInsidePhoto(photoPoint))
                 {
-                    // Первое касание - сохраняем позицию и ждем второе для номера
-                    pendingMarkPosition = e.Location;
-                    isWaitingForSecondTap = true;
-                    canvasView.InvalidateSurface();
-                }
-                else
-                {
-                    // Второе касание - создаем метку с номером
+                    // Одно касание создает метку с номером
                     marks.Add(new Mark
                     {
-                        Position = pendingMarkPosition,
+                        PhotoPosition = photoPoint,  // Сохраняем позицию в координатах фото
                         Number = currentMarkNumber++
                     });
-
-                    isWaitingForSecondTap = false;
                     canvasView.InvalidateSurface();
                 }
             }
@@ -418,30 +395,34 @@ namespace MarkApp
 
         private void HandleViewModeTouch(SKTouchEventArgs e)
         {
-            // Для масштабирования жестом щипка нужно отслеживать состояния нескольких касаний
             switch (e.ActionType)
             {
                 case SKTouchAction.Pressed:
-                    isPanning = !isScaling; // Начинаем панорамирование, если уже не масштабируем
-                    lastTouchPoint = e.Location;
-                    lastTouchTime = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                    // Начинаем панорамирование только если не масштабируем пинчем
+                    if (!isScaling)
+                    {
+                        isPanning = true;
+                        lastTouchPoint = e.Location;
+                        lastTouchTime = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                    }
                     break;
 
                 case SKTouchAction.Moved:
-                    if (e.InContact)
+                    if (e.InContact && isPanning)
                     {
-                        if (isPanning)
-                        {
-                            // Обновляем позицию панорамирования
-                            var deltaX = e.Location.X - lastTouchPoint.X;
-                            var deltaY = e.Location.Y - lastTouchPoint.Y;
+                        // Обновляем позицию панорамирования
+                        var deltaX = e.Location.X - lastTouchPoint.X;
+                        var deltaY = e.Location.Y - lastTouchPoint.Y;
 
-                            panPosition.X += deltaX;
-                            panPosition.Y += deltaY;
+                        panPosition.X += deltaX;
+                        panPosition.Y += deltaY;
 
-                            UpdateTransformMatrix();
-                            canvasView.InvalidateSurface();
-                        }
+                        // Ограничиваем панорамирование, чтобы изображение не выходило за пределы экрана слишком далеко
+                        LimitPanningPosition();
+
+                        UpdateTransformMatrix();
+                        canvasView.InvalidateSurface();
+
                         lastTouchPoint = e.Location;
                     }
                     break;
@@ -460,20 +441,51 @@ namespace MarkApp
             }
         }
 
+        // Ограничение панорамирования, чтобы изображение не выходило слишком далеко за пределы экрана
+        private void LimitPanningPosition()
+        {
+            if (photo == null) return;
+
+            float canvasWidth = (float)canvasView.Width;
+            float canvasHeight = (float)canvasView.Height;
+            float photoWidth = photo.Width * scale;
+            float photoHeight = photo.Height * scale;
+
+            // Расчет максимальных ограничений (разрешаем небольшой выход за границы)
+            float maxOffsetX = photoWidth * 0.5f;
+            float maxOffsetY = photoHeight * 0.5f;
+
+            // Ограничение по горизонтали
+            if (panPosition.X > canvasWidth + maxOffsetX)
+                panPosition.X = canvasWidth + maxOffsetX;
+            else if (panPosition.X + photoWidth < -maxOffsetX)
+                panPosition.X = -photoWidth - maxOffsetX;
+
+            // Ограничение по вертикали
+            if (panPosition.Y > canvasHeight + maxOffsetY)
+                panPosition.Y = canvasHeight + maxOffsetY;
+            else if (panPosition.Y + photoHeight < -maxOffsetY)
+                panPosition.Y = -photoHeight - maxOffsetY;
+        }
+
         private void HandleDoubleTap(SKPoint location)
         {
             // Двойное касание переключает между исходным масштабом и увеличением
-            if (Math.Abs(scale - 1.0f) < 0.1f)
+            if (Math.Abs(scale - minScale) < 0.1f)
             {
                 // Увеличение в точке касания
                 SKPoint beforeZoom = ConvertToPhotoCoordinates(location);
-                scale = 2.0f;
+                scale = Math.Min(maxScale, scale * 2.5f);
                 UpdateTransformMatrix();
 
                 // Корректировка позиции для центрирования увеличенного места
                 SKPoint afterZoom = ConvertToPhotoCoordinates(location);
                 panPosition.X += (afterZoom.X - beforeZoom.X) * scale;
                 panPosition.Y += (afterZoom.Y - beforeZoom.Y) * scale;
+
+                // Ограничение панорамирования
+                LimitPanningPosition();
+
                 UpdateTransformMatrix();
             }
             else
@@ -485,9 +497,50 @@ namespace MarkApp
             canvasView.InvalidateSurface();
         }
 
-        // Для реализации пинч-зума нужно использовать события GestureRecognizer
-        // здесь можно добавить реализацию через PinchGestureRecognizer в XAML
-        // и соответствующий метод в code-behind
+        private void OnPinchUpdated(object sender, PinchGestureUpdatedEventArgs e)
+        {
+            if (photo == null) return;
+
+            switch (e.Status)
+            {
+                case GestureStatus.Started:
+                    isScaling = true;
+                    isPanning = false;
+                    pinchStartScale = scale;
+                    pinchCenter = new SKPoint((float)e.ScaleOrigin.X * (float)canvasView.Width,
+                                             (float)e.ScaleOrigin.Y * (float)canvasView.Height);
+                    break;
+
+                case GestureStatus.Running:
+                    // Рассчитываем новый масштаб
+                    float newScale = pinchStartScale * (float)e.Scale;
+                    newScale = Math.Max(minScale, Math.Min(maxScale, newScale));
+
+                    // Вычисляем точку, которая должна оставаться под курсором при масштабировании
+                    SKPoint beforeZoom = ConvertToPhotoCoordinates(pinchCenter);
+
+                    // Устанавливаем новый масштаб
+                    scale = newScale;
+                    UpdateTransformMatrix();
+
+                    // Корректируем позицию, чтобы точка оставалась под курсором
+                    SKPoint afterZoom = ConvertToPhotoCoordinates(pinchCenter);
+                    panPosition.X += (afterZoom.X - beforeZoom.X) * scale;
+                    panPosition.Y += (afterZoom.Y - beforeZoom.Y) * scale;
+
+                    // Ограничение панорамирования
+                    LimitPanningPosition();
+
+                    UpdateTransformMatrix();
+                    canvasView.InvalidateSurface();
+                    break;
+
+                case GestureStatus.Completed:
+                case GestureStatus.Canceled:
+                    isScaling = false;
+                    break;
+            }
+        }
 
         #endregion
 
@@ -497,25 +550,10 @@ namespace MarkApp
         {
             isMarkMode = !isMarkMode;
             toggleMarkModeButton.Text = isMarkMode ? "Режим просмотра" : "Режим меток";
-
-            if (!isMarkMode)
-            {
-                // При выходе из режима меток отменяем ожидание второго касания
-                isWaitingForSecondTap = false;
-                canvasView.InvalidateSurface();
-            }
         }
 
         private void OnUndoClicked(object sender, EventArgs e)
         {
-            if (isWaitingForSecondTap)
-            {
-                // Если ждем второе касание, отменяем ожидание
-                isWaitingForSecondTap = false;
-                canvasView.InvalidateSurface();
-                return;
-            }
-
             if (marks.Count > 0)
             {
                 // Удаляем последнюю метку и уменьшаем счетчик
