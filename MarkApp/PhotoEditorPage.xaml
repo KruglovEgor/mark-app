@@ -3,49 +3,60 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:skia="clr-namespace:SkiaSharp.Views.Maui.Controls;assembly=SkiaSharp.Views.Maui.Controls"
              x:Class="MarkApp.PhotoEditorPage"
-             Title="Редактирование фото">
+             Title="Редактор фото">
 
-    <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+    <Grid RowDefinitions="Auto,*,Auto">
+        <!-- Верхняя панель инструментов -->
+        <Grid Grid.Row="0" ColumnDefinitions="*,*,*" Padding="10">
+            <Button x:Name="pickPhotoButton" Text="Открыть фото" 
+                    Clicked="OnPickPhotoClicked" 
+                    HorizontalOptions="Fill" 
+                    Grid.Column="0" />
+            
+            <Button x:Name="toggleMarkModeButton" Text="Режим меток" 
+                    Clicked="OnToggleMarkModeClicked" 
+                    HorizontalOptions="Fill" 
+                    Grid.Column="1" />
+            
+            <Button x:Name="undoButton" Text="Отменить" 
+                    Clicked="OnUndoClicked" 
+                    HorizontalOptions="Fill"
+                    Grid.Column="2" />
+        </Grid>
 
-        <!-- SkiaSharp канвас для редактирования фото -->
-        <skia:SKCanvasView x:Name="canvasView" 
-                           PaintSurface="OnCanvasViewPaintSurface"
-                           EnableTouchEvents="True"
-                           Touch="OnCanvasViewTouch"/>
+        <!-- Область просмотра и редактирования фото -->
+        <Grid Grid.Row="1">
+            <skia:SKCanvasView x:Name="canvasView"
+                             PaintSurface="OnCanvasViewPaintSurface"
+                             EnableTouchEvents="True"
+                             Touch="OnCanvasViewTouch" />
+            
+            <!-- Индикатор загрузки -->
+            <ActivityIndicator x:Name="loadingIndicator" 
+                             IsRunning="False" 
+                             IsVisible="False"
+                             HorizontalOptions="Center" 
+                             VerticalOptions="Center" />
+            
+            <!-- Информационный текст при отсутствии фото -->
+            <Label x:Name="noPhotoLabel" 
+                 Text="Нажмите 'Открыть фото' для начала работы" 
+                 HorizontalOptions="Center" 
+                 VerticalOptions="Center"
+                 IsVisible="True" />
+        </Grid>
 
-        <!-- Панель инструментов -->
-        <Grid Grid.Row="1" BackgroundColor="#f0f0f0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-
-            <Button Text="Выбрать фото" 
-                    Grid.Column="0"
-                    Clicked="OnPickPhotoClicked"
-                    Margin="5"/>
-
-            <Button Text="Метки" 
-                    Grid.Column="1"
-                    x:Name="markModeButton"
-                    Clicked="OnMarkModeClicked"
-                    Margin="5"/>
-
-            <Button Text="Отменить"
-                    Grid.Column="2" 
-                    Clicked="OnUndoClicked"
-                    Margin="5"/>
-
-            <Button Text="Сохранить" 
-                    Grid.Column="3"
-                    Clicked="OnSavePhotoClicked"
-                    Margin="5"/>
+        <!-- Нижняя панель инструментов -->
+        <Grid Grid.Row="2" ColumnDefinitions="*,*" Padding="10">
+            <Button x:Name="saveButton" Text="Сохранить" 
+                    Clicked="OnSavePhotoClicked" 
+                    HorizontalOptions="Fill"
+                    Grid.Column="0" />
+            
+            <Button x:Name="shareButton" Text="Поделиться" 
+                    Clicked="OnSharePhotoClicked" 
+                    HorizontalOptions="Fill"
+                    Grid.Column="1" />
         </Grid>
     </Grid>
 </ContentPage>

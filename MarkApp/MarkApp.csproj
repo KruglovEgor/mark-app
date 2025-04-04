@@ -73,12 +73,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <MauiXaml Update="PhotoEditorPage.xaml">
-	    <Generator>MSBuild:Compile</Generator>
-	  </MauiXaml>
-	</ItemGroup>
-
-	<ItemGroup>
 	  <PackageReference Update="Microsoft.Maui.Controls" Version="8.0.100" />
 	</ItemGroup>
 
