@@ -48,6 +48,10 @@ namespace MarkApp
         public PhotoEditorPage()
         {
             InitializeComponent();
+
+            // Устанавливаем начальные значения для слайдера
+            zoomSlider.Value = scale;
+            zoomValueLabel.Text = $"{scale * 100:0}%";
         }
 
         #region Обработка загрузки и сохранения фото
@@ -114,6 +118,14 @@ namespace MarkApp
             float scaleY = canvasHeight * 0.95f / photoHeight;
             scale = Math.Min(scaleX, scaleY);
             scale = Math.Max(minScale, Math.Min(maxScale, scale));
+
+            // Обновляем слайдер без вызова события
+            zoomSlider.ValueChanged -= OnZoomSliderValueChanged;
+            zoomSlider.Value = scale;
+            zoomSlider.ValueChanged += OnZoomSliderValueChanged;
+
+            // Обновляем текст с текущим масштабом
+            zoomValueLabel.Text = $"{scale * 100:0}%";
 
             // Вычисление позиции для центрирования
             panPosition.X = (canvasWidth - photoWidth * scale) / 2;
@@ -476,6 +488,15 @@ namespace MarkApp
                 // Увеличение в точке касания
                 SKPoint beforeZoom = ConvertToPhotoCoordinates(location);
                 scale = Math.Min(maxScale, scale * 2.5f);
+
+                // Обновляем слайдер без вызова события
+                zoomSlider.ValueChanged -= OnZoomSliderValueChanged;
+                zoomSlider.Value = scale;
+                zoomSlider.ValueChanged += OnZoomSliderValueChanged;
+
+                // Обновляем текст с текущим масштабом
+                zoomValueLabel.Text = $"{scale * 100:0}%";
+
                 UpdateTransformMatrix();
 
                 // Корректировка позиции для центрирования увеличенного места
@@ -494,6 +515,40 @@ namespace MarkApp
                 ResetViewToFit();
             }
 
+            canvasView.InvalidateSurface();
+        }
+
+        private void OnZoomSliderValueChanged(object sender, ValueChangedEventArgs e)
+        {
+            if (photo == null) return;
+
+            // Сохраняем текущую точку в центре экрана
+            float canvasWidth = (float)canvasView.Width;
+            float canvasHeight = (float)canvasView.Height;
+            SKPoint centerScreen = new SKPoint(canvasWidth / 2, canvasHeight / 2);
+            SKPoint beforeZoom = ConvertToPhotoCoordinates(centerScreen);
+
+            // Устанавливаем новый масштаб из слайдера
+            scale = (float)e.NewValue;
+
+            // Обновляем текст с текущим масштабом в процентах
+            zoomValueLabel.Text = $"{scale * 100:0}%";
+
+            // Обновляем матрицу трансформации
+            UpdateTransformMatrix();
+
+            // Корректируем позицию, чтобы центр экрана оставался в той же точке фото
+            SKPoint afterZoom = ConvertToPhotoCoordinates(centerScreen);
+            panPosition.X += (afterZoom.X - beforeZoom.X) * scale;
+            panPosition.Y += (afterZoom.Y - beforeZoom.Y) * scale;
+
+            // Ограничение панорамирования
+            LimitPanningPosition();
+
+            // Еще раз обновляем матрицу после коррекции позиции
+            UpdateTransformMatrix();
+
+            // Перерисовываем канвас
             canvasView.InvalidateSurface();
         }
 
@@ -521,6 +576,15 @@ namespace MarkApp
 
                     // Устанавливаем новый масштаб
                     scale = newScale;
+
+                    // Обновляем слайдер без вызова события
+                    zoomSlider.ValueChanged -= OnZoomSliderValueChanged;
+                    zoomSlider.Value = scale;
+                    zoomSlider.ValueChanged += OnZoomSliderValueChanged;
+
+                    // Обновляем текст с текущим масштабом
+                    zoomValueLabel.Text = $"{scale * 100:0}%";
+
                     UpdateTransformMatrix();
 
                     // Корректируем позицию, чтобы точка оставалась под курсором

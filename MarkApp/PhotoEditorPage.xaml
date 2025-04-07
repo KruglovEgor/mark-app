@@ -24,30 +24,56 @@
                     Grid.Column="2" />
         </Grid>
 
-        <!-- Область просмотра и редактирования фото -->
-        <Grid Grid.Row="1">
-            <skia:SKCanvasView x:Name="canvasView"
-                             PaintSurface="OnCanvasViewPaintSurface"
-                             EnableTouchEvents="True"
-                             Touch="OnCanvasViewTouch">
-                <skia:SKCanvasView.GestureRecognizers>
-                    <PinchGestureRecognizer PinchUpdated="OnPinchUpdated" />
-                </skia:SKCanvasView.GestureRecognizers>
-            </skia:SKCanvasView>
+        <!-- Область просмотра и редактирования фото с вертикальным слайдером -->
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+            <!-- Основная область с канвасом -->
+            <Grid Grid.Column="0">
+                <skia:SKCanvasView x:Name="canvasView"
+                                 PaintSurface="OnCanvasViewPaintSurface"
+                                 EnableTouchEvents="True"
+                                 Touch="OnCanvasViewTouch" />
+                
+                <!-- Индикатор загрузки -->
+                <ActivityIndicator x:Name="loadingIndicator" 
+                                 IsRunning="False" 
+                                 IsVisible="False"
+                                 HorizontalOptions="Center" 
+                                 VerticalOptions="Center" />
+                
+                <!-- Информационный текст при отсутствии фото -->
+                <Label x:Name="noPhotoLabel" 
+                     Text="Нажмите 'Открыть фото' для начала работы" 
+                     HorizontalOptions="Center" 
+                     VerticalOptions="Center"
+                     IsVisible="True" />
+            </Grid>
             
-            <!-- Индикатор загрузки -->
-            <ActivityIndicator x:Name="loadingIndicator" 
-                             IsRunning="False" 
-                             IsVisible="False"
-                             HorizontalOptions="Center" 
-                             VerticalOptions="Center" />
-            
-            <!-- Информационный текст при отсутствии фото -->
-            <Label x:Name="noPhotoLabel" 
-                 Text="Нажмите 'Открыть фото' для начала работы" 
-                 HorizontalOptions="Center" 
-                 VerticalOptions="Center"
-                 IsVisible="True" />
+            <!-- Вертикальный слайдер для масштабирования (повернутый на 90 градусов) -->
+            <Grid Grid.Column="1" WidthRequest="60" Padding="5,0,10,0">
+                <VerticalStackLayout VerticalOptions="Center">
+                    <Label Text="+" FontSize="18" HorizontalOptions="Center" />
+                    
+                    <!-- Используем вращение для вертикальной ориентации -->
+                    <Grid HeightRequest="250" WidthRequest="40">
+                        <Slider x:Name="zoomSlider"
+                                Minimum="0.5" 
+                                Maximum="5.0" 
+                                Value="1.0"
+                                ValueChanged="OnZoomSliderValueChanged"
+                                Rotation="270"
+                                WidthRequest="250"
+                                HorizontalOptions="Center"
+                                VerticalOptions="Center" />
+                    </Grid>
+                    
+                    <Label Text="-" FontSize="18" HorizontalOptions="Center" />
+                    <Label x:Name="zoomValueLabel" 
+                           Text="100%" 
+                           FontSize="12" 
+                           HorizontalOptions="Center" 
+                           Margin="0,5,0,0" />
+                </VerticalStackLayout>
+            </Grid>
         </Grid>
 
         <!-- Нижняя панель инструментов -->
