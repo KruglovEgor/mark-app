@@ -1,9 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
-using Microsoft.Maui.Controls.Hosting;
-using Microsoft.Maui.Hosting;
-using Syncfusion.Maui.Core.Hosting;
 using System.Diagnostics;
-using System.Reflection;
+using SkiaSharp.Views.Maui.Controls.Hosting;
 
 namespace MarkApp;
 
@@ -19,7 +16,7 @@ public static class MauiProgram
             var builder = MauiApp.CreateBuilder();
             builder
                 .UseMauiApp<App>()
-                .ConfigureSyncfusionCore()
+                .UseSkiaSharp() // Добавьте этот вызов для поддержки SkiaSharp
                 .ConfigureFonts(fonts =>
                 {
                     fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");

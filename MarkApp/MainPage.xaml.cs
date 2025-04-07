@@ -12,7 +12,7 @@ namespace MarkApp
         private async void OnNavigateToEditPageClicked(object sender, EventArgs e)
         {
             // Просто переходим на страницу редактора
-            await Navigation.PushAsync(new EditPhotoPage());
+            await Navigation.PushAsync(new PhotoEditorPage());
         }
     }
 }
