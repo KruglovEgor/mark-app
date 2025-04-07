@@ -34,8 +34,17 @@ namespace MarkApp
         private bool isMarkMode = false;
         private int currentMarkNumber = 1;
 
+        // Размеры меток относительно фото (в процентах от ширины фото)
+        private const float CircleRadiusPercent = 0.02f; // 2% от ширины фото
+        private const float TextSizePercent = 0.02f;     // 2% от ширины фото
+        private const float StrokeWidthPercent = 0.002f; // 0.2% от ширины фото
+
+        // Абсолютные минимальные размеры для экспорта
+        private const float MinExportCircleRadius = 20f;
+        private const float MinExportTextSize = 20f;
+        private const float MinExportStrokeWidth = 2f;
+
         // Структура для хранения метки с кружком и номером
-        // Изменено: позиция хранится в координатах фотографии, а не экрана
         private class Mark
         {
             public SKPoint PhotoPosition { get; set; }  // Позиция в координатах фотографии
@@ -158,33 +167,32 @@ namespace MarkApp
                 loadingIndicator.IsVisible = true;
                 loadingIndicator.IsRunning = true;
 
-                // Создаем новое изображение с метками
-                var info = new SKImageInfo(photo.Width, photo.Height);
-                using (var surface = SKSurface.Create(info))
+                // Клонируем оригинальное изображение
+                var photoCopy = photo.Copy();
+
+                // Рисуем метки непосредственно на копии изображения
+                using (var canvas = new SKCanvas(photoCopy))
                 {
-                    var canvas = surface.Canvas;
-                    canvas.Clear(); // Не используем белый цвет, чтобы не влиять на яркость
-                    canvas.DrawBitmap(photo, 0, 0);
-
-                    // Отрисовка меток на изображении
+                    // Рисуем метки
                     DrawMarksToCanvas(canvas, true);
+                }
 
-                    // Создание и сохранение изображения с максимальным качеством
-                    using (var image = surface.Snapshot())
-                    using (var data = image.Encode(SKEncodedImageFormat.Jpeg, 100))
+                // Преобразуем битмапу в данные для сохранения
+                using (var image = SKImage.FromBitmap(photoCopy))
+                using (var data = image.Encode(SKEncodedImageFormat.Png, 100)) // PNG для лучшего качества
+                {
+                    var filename = $"MarkedPhoto_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+                    var cacheFilePath = Path.Combine(FileSystem.CacheDirectory, filename);
+
+                    using (var fs = File.OpenWrite(cacheFilePath))
                     {
-                        // Путь для сохранения в кэш директорию
-                        var filePath = Path.Combine(FileSystem.CacheDirectory, $"MarkedPhoto_{DateTime.Now:yyyyMMdd_HHmmss}.jpg");
-                        using (var fs = File.OpenWrite(filePath))
-                        {
-                            data.SaveTo(fs);
-                        }
-
-                        // Сообщаем пользователю об успешном сохранении
-                        await DisplayAlert("Успех", "Фото сохранено", "OK");
-
-                        // В реальном приложении можно здесь добавить код для сохранения в галерею
+                        data.SaveTo(fs);
                     }
+
+                    // Сохраняем в галерею
+                    await SaveToGallery(cacheFilePath, filename);
+
+                    await DisplayAlert("Успех", "Фото сохранено в галерею", "OK");
                 }
             }
             catch (Exception ex)
@@ -196,6 +204,140 @@ namespace MarkApp
                 loadingIndicator.IsVisible = false;
                 loadingIndicator.IsRunning = false;
             }
+        }
+
+        // Метод для сохранения фото в галерею
+        private async Task SaveToGallery(string filePath, string filename)
+        {
+            if (!File.Exists(filePath))
+                return;
+
+#if ANDROID
+                try
+                {
+                    // Проверяем разрешения на запись для Android
+                    var status = await Permissions.CheckStatusAsync<Permissions.StorageWrite>();
+                    if (status != PermissionStatus.Granted)
+                    {
+                        status = await Permissions.RequestAsync<Permissions.StorageWrite>();
+                        if (status != PermissionStatus.Granted)
+                            return;
+                    }
+
+                    // Также запрашиваем доступ к медиа
+                    var mediaStatus = await Permissions.CheckStatusAsync<Permissions.Media>();
+                    if (mediaStatus != PermissionStatus.Granted)
+                    {
+                        mediaStatus = await Permissions.RequestAsync<Permissions.Media>();
+                        if (mediaStatus != PermissionStatus.Granted)
+                            return;
+                    }
+
+                    // Более современный способ для API 29+
+                    using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+                    var values = new Android.Content.ContentValues();
+                    values.Put(Android.Provider.MediaStore.Images.Media.InterfaceConsts.DisplayName, filename);
+                    values.Put(Android.Provider.MediaStore.Images.Media.InterfaceConsts.MimeType, "image/jpeg");
+                    
+                    // Используем относительный путь только для Android API 29+
+                    if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.Q)
+                    {
+                        values.Put(Android.Provider.MediaStore.Images.Media.InterfaceConsts.RelativePath, "Pictures/MarkApp");
+                    }
+
+                    var resolver = Android.App.Application.Context.ContentResolver;
+                    var contentUri = Android.Provider.MediaStore.Images.Media.ExternalContentUri;
+                    
+                    if (contentUri != null)
+                    {
+                        var uri = resolver?.Insert(contentUri, values);
+
+                        if (uri != null)
+                        {
+                            using var outputStream = resolver?.OpenOutputStream(uri);
+                            if (outputStream != null)
+                            {
+                                await stream.CopyToAsync(outputStream);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error saving to gallery: {ex.Message}");
+                    
+                    // Для API < 29 используем старый способ
+                    if (Android.OS.Build.VERSION.SdkInt < Android.OS.BuildVersionCodes.Q)
+                    {
+                        try
+                        {
+                            var mediaScanIntent = new Android.Content.Intent(Android.Content.Intent.ActionMediaScannerScanFile);
+                            var file = new Java.IO.File(filePath);
+                            var uri = Android.Net.Uri.FromFile(file);
+                            mediaScanIntent.SetData(uri);
+                            Android.App.Application.Context.SendBroadcast(mediaScanIntent);
+                        }
+                        catch (Exception scanEx)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Error with media scanner: {scanEx.Message}");
+                        }
+                    }
+                }
+#endif
+
+#if IOS
+            try
+            {
+                // Для iOS используем Photos API
+                var status = await Permissions.CheckStatusAsync<Permissions.Photos>();
+                if (status != PermissionStatus.Granted)
+                {
+                    status = await Permissions.RequestAsync<Permissions.Photos>();
+                    if (status != PermissionStatus.Granted)
+                        return;
+                }
+
+                // Запрашиваем авторизацию в Photos (статический метод)
+                await Photos.PHPhotoLibrary.RequestAuthorizationAsync();
+
+                // Получаем общий экземпляр библиотеки фотографий
+                var library = Photos.PHPhotoLibrary.SharedPhotoLibrary;
+                if (library == null)
+                    return;
+
+                // Создаем изображение из файла
+                var image = UIKit.UIImage.FromFile(filePath);
+                if (image == null)
+                    return;
+
+                // Сохраняем изображение в фотогалерею
+                var tcs = new TaskCompletionSource<bool>();
+
+                library.PerformChanges(() =>
+                {
+                    Photos.PHAssetCreationRequest.CreationRequestForAsset().AddResource(Photos.PHAssetResourceType.Photo,
+                        Foundation.NSUrl.FromFilename(filePath), null);
+                },
+                (success, error) =>
+                {
+                    if (error != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"iOS photo save error: {error.LocalizedDescription}");
+                        tcs.SetResult(false);
+                    }
+                    else
+                    {
+                        tcs.SetResult(success);
+                    }
+                });
+
+                await tcs.Task;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error saving to iOS gallery: {ex.Message}");
+            }
+#endif
         }
 
         private async void OnSharePhotoClicked(object sender, EventArgs e)
@@ -211,34 +353,32 @@ namespace MarkApp
                 loadingIndicator.IsVisible = true;
                 loadingIndicator.IsRunning = true;
 
-                // Создаем новое изображение с метками
-                var info = new SKImageInfo(photo.Width, photo.Height);
-                using (var surface = SKSurface.Create(info))
+                // Клонируем оригинальное изображение
+                var photoCopy = photo.Copy();
+
+                // Рисуем метки непосредственно на копии изображения
+                using (var canvas = new SKCanvas(photoCopy))
                 {
-                    var canvas = surface.Canvas;
-                    canvas.Clear(); // Без белого цвета
-                    canvas.DrawBitmap(photo, 0, 0);
-
-                    // Отрисовка меток на изображении
+                    // Рисуем метки
                     DrawMarksToCanvas(canvas, true);
+                }
 
-                    // Создание и сохранение временного файла для шаринга с максимальным качеством
-                    using (var image = surface.Snapshot())
-                    using (var data = image.Encode(SKEncodedImageFormat.Jpeg, 100))
+                // Преобразуем битмапу в данные для сохранения
+                using (var image = SKImage.FromBitmap(photoCopy))
+                using (var data = image.Encode(SKEncodedImageFormat.Png, 100)) // PNG для лучшего качества
+                {
+                    var filePath = Path.Combine(FileSystem.CacheDirectory, $"SharedPhoto_{DateTime.Now:yyyyMMdd_HHmmss}.png");
+                    using (var fs = File.OpenWrite(filePath))
                     {
-                        var filePath = Path.Combine(FileSystem.CacheDirectory, $"SharedPhoto_{DateTime.Now:yyyyMMdd_HHmmss}.jpg");
-                        using (var fs = File.OpenWrite(filePath))
-                        {
-                            data.SaveTo(fs);
-                        }
-
-                        // Шаринг файла
-                        await Share.RequestAsync(new ShareFileRequest
-                        {
-                            Title = "Поделиться фото с метками",
-                            File = new ShareFile(filePath)
-                        });
+                        data.SaveTo(fs);
                     }
+
+                    // Шаринг файла
+                    await Share.RequestAsync(new ShareFileRequest
+                    {
+                        Title = "Поделиться фото с метками",
+                        File = new ShareFile(filePath)
+                    });
                 }
             }
             catch (Exception ex)
@@ -278,15 +418,28 @@ namespace MarkApp
             // Возврат к исходным координатам для отрисовки меток
             canvas.Restore();
 
-            // Отрисовка меток
+            // Отрисовка меток с фиксированным размером
             DrawMarksToCanvas(canvas, false);
         }
 
         private void DrawMarksToCanvas(SKCanvas canvas, bool forExport)
         {
-            // Для разных целей используем разные радиусы и размеры шрифта
-            float circleRadius = forExport ? 40 : 30;
-            float textSize = forExport ? 40 : 24;
+            if (photo == null || marks.Count == 0)
+                return;
+
+            // Рассчитываем размеры меток относительно фото
+            float photoWidth = photo.Width;
+            float circleRadius = photoWidth * CircleRadiusPercent;
+            float textSize = photoWidth * TextSizePercent;
+            float strokeWidth = photoWidth * StrokeWidthPercent;
+
+            // Для экспорта используем минимальные значения
+            if (forExport)
+            {
+                circleRadius = Math.Max(circleRadius, MinExportCircleRadius);
+                textSize = Math.Max(textSize, MinExportTextSize);
+                strokeWidth = Math.Max(strokeWidth, MinExportStrokeWidth);
+            }
 
             foreach (var mark in marks)
             {
@@ -312,7 +465,15 @@ namespace MarkApp
                     IsAntialias = true
                 })
                 {
-                    canvas.DrawCircle(position, circleRadius, paint);
+                    if (forExport)
+                    {
+                        canvas.DrawCircle(position, circleRadius, paint);
+                    }
+                    else
+                    {
+                        // Учитываем масштаб для отображения на экране
+                        canvas.DrawCircle(position, circleRadius * scale, paint);
+                    }
                 }
 
                 // Рисуем границу кружка
@@ -320,25 +481,33 @@ namespace MarkApp
                 {
                     Style = SKPaintStyle.Stroke,
                     Color = SKColors.Red,
-                    StrokeWidth = 3,
+                    StrokeWidth = forExport ? strokeWidth : strokeWidth * scale,
                     IsAntialias = true
                 })
                 {
-                    canvas.DrawCircle(position, circleRadius, paint);
+                    if (forExport)
+                    {
+                        canvas.DrawCircle(position, circleRadius, paint);
+                    }
+                    else
+                    {
+                        canvas.DrawCircle(position, circleRadius * scale, paint);
+                    }
                 }
 
                 // Рисуем номер метки
                 using (var paint = new SKPaint
                 {
                     Color = SKColors.White,
-                    TextSize = textSize,
+                    TextSize = forExport ? textSize : textSize * scale,
                     IsAntialias = true,
                     TextAlign = SKTextAlign.Center
                 })
                 {
+                    float verticalOffset = forExport ? textSize / 3 : (textSize * scale) / 3;
                     canvas.DrawText(mark.Number.ToString(),
                                     position.X,
-                                    position.Y + (textSize / 3), // Корректировка для вертикального центрирования
+                                    position.Y + verticalOffset,
                                     paint);
                 }
             }
@@ -410,13 +579,8 @@ namespace MarkApp
             switch (e.ActionType)
             {
                 case SKTouchAction.Pressed:
-                    // Начинаем панорамирование только если не масштабируем пинчем
-                    if (!isScaling)
-                    {
-                        isPanning = true;
-                        lastTouchPoint = e.Location;
-                        lastTouchTime = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-                    }
+                    isPanning = true;
+                    lastTouchPoint = e.Location;
                     break;
 
                 case SKTouchAction.Moved:
@@ -429,7 +593,7 @@ namespace MarkApp
                         panPosition.X += deltaX;
                         panPosition.Y += deltaY;
 
-                        // Ограничиваем панорамирование, чтобы изображение не выходило за пределы экрана слишком далеко
+                        // Ограничиваем панорамирование
                         LimitPanningPosition();
 
                         UpdateTransformMatrix();
@@ -441,19 +605,11 @@ namespace MarkApp
 
                 case SKTouchAction.Released:
                     isPanning = false;
-
-                    // Проверка на двойное касание для масштабирования
-                    long currentTime = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-                    if (currentTime - lastTouchTime < 300) // 300мс для двойного касания
-                    {
-                        HandleDoubleTap(e.Location);
-                    }
-                    lastTouchTime = currentTime;
                     break;
             }
         }
 
-        // Ограничение панорамирования, чтобы изображение не выходило слишком далеко за пределы экрана
+        // Ограничение панорамирования, чтобы изображение не выходило за пределы экрана
         private void LimitPanningPosition()
         {
             if (photo == null) return;
@@ -463,59 +619,23 @@ namespace MarkApp
             float photoWidth = photo.Width * scale;
             float photoHeight = photo.Height * scale;
 
-            // Расчет максимальных ограничений (разрешаем небольшой выход за границы)
-            float maxOffsetX = photoWidth * 0.5f;
-            float maxOffsetY = photoHeight * 0.5f;
+            // Более строгие ограничения - фото всегда должно быть на экране
+            // Минимальное значение X - отрицательное: (photoWidth - минимальная видимая часть)
+            // Максимальное значение X - положительное: (canvasWidth - минимальная видимая часть)
+            float minVisiblePart = Math.Min(photoWidth, canvasWidth) * 0.25f; // Хотя бы 25% фото должно быть видно
 
             // Ограничение по горизонтали
-            if (panPosition.X > canvasWidth + maxOffsetX)
-                panPosition.X = canvasWidth + maxOffsetX;
-            else if (panPosition.X + photoWidth < -maxOffsetX)
-                panPosition.X = -photoWidth - maxOffsetX;
+            if (panPosition.X > canvasWidth - minVisiblePart)
+                panPosition.X = canvasWidth - minVisiblePart;
+            else if (panPosition.X + photoWidth < minVisiblePart)
+                panPosition.X = minVisiblePart - photoWidth;
 
-            // Ограничение по вертикали
-            if (panPosition.Y > canvasHeight + maxOffsetY)
-                panPosition.Y = canvasHeight + maxOffsetY;
-            else if (panPosition.Y + photoHeight < -maxOffsetY)
-                panPosition.Y = -photoHeight - maxOffsetY;
-        }
-
-        private void HandleDoubleTap(SKPoint location)
-        {
-            // Двойное касание переключает между исходным масштабом и увеличением
-            if (Math.Abs(scale - minScale) < 0.1f)
-            {
-                // Увеличение в точке касания
-                SKPoint beforeZoom = ConvertToPhotoCoordinates(location);
-                scale = Math.Min(maxScale, scale * 2.5f);
-
-                // Обновляем слайдер без вызова события
-                zoomSlider.ValueChanged -= OnZoomSliderValueChanged;
-                zoomSlider.Value = scale;
-                zoomSlider.ValueChanged += OnZoomSliderValueChanged;
-
-                // Обновляем текст с текущим масштабом
-                zoomValueLabel.Text = $"{scale * 100:0}%";
-
-                UpdateTransformMatrix();
-
-                // Корректировка позиции для центрирования увеличенного места
-                SKPoint afterZoom = ConvertToPhotoCoordinates(location);
-                panPosition.X += (afterZoom.X - beforeZoom.X) * scale;
-                panPosition.Y += (afterZoom.Y - beforeZoom.Y) * scale;
-
-                // Ограничение панорамирования
-                LimitPanningPosition();
-
-                UpdateTransformMatrix();
-            }
-            else
-            {
-                // Возврат к фиксации изображения на экране
-                ResetViewToFit();
-            }
-
-            canvasView.InvalidateSurface();
+            // Ограничение по вертикали с такой же логикой
+            float minVisiblePartY = Math.Min(photoHeight, canvasHeight) * 0.25f;
+            if (panPosition.Y > canvasHeight - minVisiblePartY)
+                panPosition.Y = canvasHeight - minVisiblePartY;
+            else if (panPosition.Y + photoHeight < minVisiblePartY)
+                panPosition.Y = minVisiblePartY - photoHeight;
         }
 
         private void OnZoomSliderValueChanged(object sender, ValueChangedEventArgs e)
@@ -550,60 +670,6 @@ namespace MarkApp
 
             // Перерисовываем канвас
             canvasView.InvalidateSurface();
-        }
-
-        private void OnPinchUpdated(object sender, PinchGestureUpdatedEventArgs e)
-        {
-            if (photo == null) return;
-
-            switch (e.Status)
-            {
-                case GestureStatus.Started:
-                    isScaling = true;
-                    isPanning = false;
-                    pinchStartScale = scale;
-                    pinchCenter = new SKPoint((float)e.ScaleOrigin.X * (float)canvasView.Width,
-                                             (float)e.ScaleOrigin.Y * (float)canvasView.Height);
-                    break;
-
-                case GestureStatus.Running:
-                    // Рассчитываем новый масштаб
-                    float newScale = pinchStartScale * (float)e.Scale;
-                    newScale = Math.Max(minScale, Math.Min(maxScale, newScale));
-
-                    // Вычисляем точку, которая должна оставаться под курсором при масштабировании
-                    SKPoint beforeZoom = ConvertToPhotoCoordinates(pinchCenter);
-
-                    // Устанавливаем новый масштаб
-                    scale = newScale;
-
-                    // Обновляем слайдер без вызова события
-                    zoomSlider.ValueChanged -= OnZoomSliderValueChanged;
-                    zoomSlider.Value = scale;
-                    zoomSlider.ValueChanged += OnZoomSliderValueChanged;
-
-                    // Обновляем текст с текущим масштабом
-                    zoomValueLabel.Text = $"{scale * 100:0}%";
-
-                    UpdateTransformMatrix();
-
-                    // Корректируем позицию, чтобы точка оставалась под курсором
-                    SKPoint afterZoom = ConvertToPhotoCoordinates(pinchCenter);
-                    panPosition.X += (afterZoom.X - beforeZoom.X) * scale;
-                    panPosition.Y += (afterZoom.Y - beforeZoom.Y) * scale;
-
-                    // Ограничение панорамирования
-                    LimitPanningPosition();
-
-                    UpdateTransformMatrix();
-                    canvasView.InvalidateSurface();
-                    break;
-
-                case GestureStatus.Completed:
-                case GestureStatus.Canceled:
-                    isScaling = false;
-                    break;
-            }
         }
 
         #endregion
