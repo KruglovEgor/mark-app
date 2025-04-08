@@ -32,23 +32,31 @@ namespace MarkApp
 
         // Режимы работы
         private bool isMarkMode = false;
-        private int currentMarkNumber = 1;
+        private bool isWaitingForSecondPoint = false;
+        private SKPoint firstPoint; // Первая точка для режима меток
 
         // Размеры меток относительно фото (в процентах от ширины фото)
         private const float CircleRadiusPercent = 0.02f; // 2% от ширины фото
+        private const float TextBoxWidthPercent = 0.06f; // 6% от ширины фото
+        private const float TextBoxHeightPercent = 0.04f; // 4% от ширины фото
         private const float TextSizePercent = 0.02f;     // 2% от ширины фото
         private const float StrokeWidthPercent = 0.002f; // 0.2% от ширины фото
+        private const float LineWidthPercent = 0.002f;   // 0.2% от ширины фото
 
         // Абсолютные минимальные размеры для экспорта
         private const float MinExportCircleRadius = 20f;
+        private const float MinExportTextBoxWidth = 60f;
+        private const float MinExportTextBoxHeight = 40f;
         private const float MinExportTextSize = 20f;
         private const float MinExportStrokeWidth = 2f;
+        private const float MinExportLineWidth = 2f;
 
-        // Структура для хранения метки с кружком и номером
+        // Структура для хранения метки с кружком, прямоугольником и линией
         private class Mark
         {
-            public SKPoint PhotoPosition { get; set; }  // Позиция в координатах фотографии
-            public int Number { get; set; }
+            public SKPoint CirclePosition { get; set; }      // Позиция кружка в координатах фотографии
+            public SKPoint BoxPosition { get; set; }         // Позиция прямоугольника в координатах фотографии
+            public int Number { get; set; }                  // Номер метки
         }
 
         // История действий для отмены
@@ -88,7 +96,7 @@ namespace MarkApp
 
                         // Сброс настроек при загрузке нового изображения
                         marks.Clear();
-                        currentMarkNumber = 1;
+                        isWaitingForSecondPoint = false;
                         isMarkMode = false;
                         toggleMarkModeButton.Text = "Режим меток";
 
@@ -213,130 +221,130 @@ namespace MarkApp
                 return;
 
 #if ANDROID
+                    try
+                    {
+                        // Проверяем разрешения на запись для Android
+                        var status = await Permissions.CheckStatusAsync<Permissions.StorageWrite>();
+                        if (status != PermissionStatus.Granted)
+                        {
+                            status = await Permissions.RequestAsync<Permissions.StorageWrite>();
+                            if (status != PermissionStatus.Granted)
+                                return;
+                        }
+
+                        // Также запрашиваем доступ к медиа
+                        var mediaStatus = await Permissions.CheckStatusAsync<Permissions.Media>();
+                        if (mediaStatus != PermissionStatus.Granted)
+                        {
+                            mediaStatus = await Permissions.RequestAsync<Permissions.Media>();
+                            if (mediaStatus != PermissionStatus.Granted)
+                                return;
+                        }
+
+                        // Более современный способ для API 29+
+                        using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+                        var values = new Android.Content.ContentValues();
+                        values.Put(Android.Provider.MediaStore.Images.Media.InterfaceConsts.DisplayName, filename);
+                        values.Put(Android.Provider.MediaStore.Images.Media.InterfaceConsts.MimeType, "image/png");
+                        
+                        // Используем относительный путь только для Android API 29+
+                        if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.Q)
+                        {
+                            values.Put(Android.Provider.MediaStore.Images.Media.InterfaceConsts.RelativePath, "Pictures/MarkApp");
+                        }
+
+                        var resolver = Android.App.Application.Context.ContentResolver;
+                        var contentUri = Android.Provider.MediaStore.Images.Media.ExternalContentUri;
+                        
+                        if (contentUri != null)
+                        {
+                            var uri = resolver?.Insert(contentUri, values);
+
+                            if (uri != null)
+                            {
+                                using var outputStream = resolver?.OpenOutputStream(uri);
+                                if (outputStream != null)
+                                {
+                                    await stream.CopyToAsync(outputStream);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Error saving to gallery: {ex.Message}");
+                        
+                        // Для API < 29 используем старый способ
+                        if (Android.OS.Build.VERSION.SdkInt < Android.OS.BuildVersionCodes.Q)
+                        {
+                            try
+                            {
+                                var mediaScanIntent = new Android.Content.Intent(Android.Content.Intent.ActionMediaScannerScanFile);
+                                var file = new Java.IO.File(filePath);
+                                var uri = Android.Net.Uri.FromFile(file);
+                                mediaScanIntent.SetData(uri);
+                                Android.App.Application.Context.SendBroadcast(mediaScanIntent);
+                            }
+                            catch (Exception scanEx)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"Error with media scanner: {scanEx.Message}");
+                            }
+                        }
+                    }
+#endif
+
+#if IOS
                 try
                 {
-                    // Проверяем разрешения на запись для Android
-                    var status = await Permissions.CheckStatusAsync<Permissions.StorageWrite>();
+                    // Для iOS используем Photos API
+                    var status = await Permissions.CheckStatusAsync<Permissions.Photos>();
                     if (status != PermissionStatus.Granted)
                     {
-                        status = await Permissions.RequestAsync<Permissions.StorageWrite>();
+                        status = await Permissions.RequestAsync<Permissions.Photos>();
                         if (status != PermissionStatus.Granted)
                             return;
                     }
 
-                    // Также запрашиваем доступ к медиа
-                    var mediaStatus = await Permissions.CheckStatusAsync<Permissions.Media>();
-                    if (mediaStatus != PermissionStatus.Granted)
-                    {
-                        mediaStatus = await Permissions.RequestAsync<Permissions.Media>();
-                        if (mediaStatus != PermissionStatus.Granted)
-                            return;
-                    }
+                    // Запрашиваем авторизацию в Photos (статический метод)
+                    await Photos.PHPhotoLibrary.RequestAuthorizationAsync();
 
-                    // Более современный способ для API 29+
-                    using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
-                    var values = new Android.Content.ContentValues();
-                    values.Put(Android.Provider.MediaStore.Images.Media.InterfaceConsts.DisplayName, filename);
-                    values.Put(Android.Provider.MediaStore.Images.Media.InterfaceConsts.MimeType, "image/jpeg");
-                    
-                    // Используем относительный путь только для Android API 29+
-                    if (Android.OS.Build.VERSION.SdkInt >= Android.OS.BuildVersionCodes.Q)
-                    {
-                        values.Put(Android.Provider.MediaStore.Images.Media.InterfaceConsts.RelativePath, "Pictures/MarkApp");
-                    }
+                    // Получаем общий экземпляр библиотеки фотографий
+                    var library = Photos.PHPhotoLibrary.SharedPhotoLibrary;
+                    if (library == null)
+                        return;
 
-                    var resolver = Android.App.Application.Context.ContentResolver;
-                    var contentUri = Android.Provider.MediaStore.Images.Media.ExternalContentUri;
-                    
-                    if (contentUri != null)
-                    {
-                        var uri = resolver?.Insert(contentUri, values);
+                    // Создаем изображение из файла
+                    var image = UIKit.UIImage.FromFile(filePath);
+                    if (image == null)
+                        return;
 
-                        if (uri != null)
+                    // Сохраняем изображение в фотогалерею
+                    var tcs = new TaskCompletionSource<bool>();
+
+                    library.PerformChanges(() =>
+                    {
+                        Photos.PHAssetCreationRequest.CreationRequestForAsset().AddResource(Photos.PHAssetResourceType.Photo,
+                            Foundation.NSUrl.FromFilename(filePath), null);
+                    },
+                    (success, error) =>
+                    {
+                        if (error != null)
                         {
-                            using var outputStream = resolver?.OpenOutputStream(uri);
-                            if (outputStream != null)
-                            {
-                                await stream.CopyToAsync(outputStream);
-                            }
+                            System.Diagnostics.Debug.WriteLine($"iOS photo save error: {error.LocalizedDescription}");
+                            tcs.SetResult(false);
                         }
-                    }
+                        else
+                        {
+                            tcs.SetResult(success);
+                        }
+                    });
+
+                    await tcs.Task;
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Error saving to gallery: {ex.Message}");
-                    
-                    // Для API < 29 используем старый способ
-                    if (Android.OS.Build.VERSION.SdkInt < Android.OS.BuildVersionCodes.Q)
-                    {
-                        try
-                        {
-                            var mediaScanIntent = new Android.Content.Intent(Android.Content.Intent.ActionMediaScannerScanFile);
-                            var file = new Java.IO.File(filePath);
-                            var uri = Android.Net.Uri.FromFile(file);
-                            mediaScanIntent.SetData(uri);
-                            Android.App.Application.Context.SendBroadcast(mediaScanIntent);
-                        }
-                        catch (Exception scanEx)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"Error with media scanner: {scanEx.Message}");
-                        }
-                    }
+                    System.Diagnostics.Debug.WriteLine($"Error saving to iOS gallery: {ex.Message}");
                 }
-#endif
-
-#if IOS
-            try
-            {
-                // Для iOS используем Photos API
-                var status = await Permissions.CheckStatusAsync<Permissions.Photos>();
-                if (status != PermissionStatus.Granted)
-                {
-                    status = await Permissions.RequestAsync<Permissions.Photos>();
-                    if (status != PermissionStatus.Granted)
-                        return;
-                }
-
-                // Запрашиваем авторизацию в Photos (статический метод)
-                await Photos.PHPhotoLibrary.RequestAuthorizationAsync();
-
-                // Получаем общий экземпляр библиотеки фотографий
-                var library = Photos.PHPhotoLibrary.SharedPhotoLibrary;
-                if (library == null)
-                    return;
-
-                // Создаем изображение из файла
-                var image = UIKit.UIImage.FromFile(filePath);
-                if (image == null)
-                    return;
-
-                // Сохраняем изображение в фотогалерею
-                var tcs = new TaskCompletionSource<bool>();
-
-                library.PerformChanges(() =>
-                {
-                    Photos.PHAssetCreationRequest.CreationRequestForAsset().AddResource(Photos.PHAssetResourceType.Photo,
-                        Foundation.NSUrl.FromFilename(filePath), null);
-                },
-                (success, error) =>
-                {
-                    if (error != null)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"iOS photo save error: {error.LocalizedDescription}");
-                        tcs.SetResult(false);
-                    }
-                    else
-                    {
-                        tcs.SetResult(success);
-                    }
-                });
-
-                await tcs.Task;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error saving to iOS gallery: {ex.Message}");
-            }
 #endif
         }
 
@@ -420,6 +428,40 @@ namespace MarkApp
 
             // Отрисовка меток с фиксированным размером
             DrawMarksToCanvas(canvas, false);
+
+            // Если ожидаем второй точки, рисуем временный кружок первой точки
+            if (isWaitingForSecondPoint)
+            {
+                DrawTemporaryCircle(canvas);
+            }
+        }
+
+        private void DrawTemporaryCircle(SKCanvas canvas)
+        {
+            // Отображаем временный кружок для первой точки
+            SKPoint screenPosition = transformMatrix.MapPoint(firstPoint);
+            float circleRadius = photo.Width * CircleRadiusPercent * scale;
+
+            using (var paint = new SKPaint
+            {
+                Style = SKPaintStyle.Fill,
+                Color = new SKColor(255, 0, 0, 128),
+                IsAntialias = true
+            })
+            {
+                canvas.DrawCircle(screenPosition, circleRadius, paint);
+            }
+
+            using (var paint = new SKPaint
+            {
+                Style = SKPaintStyle.Stroke,
+                Color = SKColors.Red,
+                StrokeWidth = photo.Width * StrokeWidthPercent * scale,
+                IsAntialias = true
+            })
+            {
+                canvas.DrawCircle(screenPosition, circleRadius, paint);
+            }
         }
 
         private void DrawMarksToCanvas(SKCanvas canvas, bool forExport)
@@ -430,34 +472,58 @@ namespace MarkApp
             // Рассчитываем размеры меток относительно фото
             float photoWidth = photo.Width;
             float circleRadius = photoWidth * CircleRadiusPercent;
+            float boxWidth = photoWidth * TextBoxWidthPercent;
+            float boxHeight = photoWidth * TextBoxHeightPercent;
             float textSize = photoWidth * TextSizePercent;
             float strokeWidth = photoWidth * StrokeWidthPercent;
+            float lineWidth = photoWidth * LineWidthPercent;
 
             // Для экспорта используем минимальные значения
             if (forExport)
             {
                 circleRadius = Math.Max(circleRadius, MinExportCircleRadius);
+                boxWidth = Math.Max(boxWidth, MinExportTextBoxWidth);
+                boxHeight = Math.Max(boxHeight, MinExportTextBoxHeight);
                 textSize = Math.Max(textSize, MinExportTextSize);
                 strokeWidth = Math.Max(strokeWidth, MinExportStrokeWidth);
+                lineWidth = Math.Max(lineWidth, MinExportLineWidth);
             }
 
             foreach (var mark in marks)
             {
-                // Получаем позицию метки
-                SKPoint position;
+                // Получаем позиции элементов
+                SKPoint circlePosition, boxPosition;
+                float actualCircleRadius, actualBoxWidth, actualBoxHeight, actualTextSize;
+                float actualStrokeWidth, actualLineWidth;
 
                 if (forExport)
                 {
                     // Для экспорта используем координаты фотографии напрямую
-                    position = mark.PhotoPosition;
+                    circlePosition = mark.CirclePosition;
+                    boxPosition = mark.BoxPosition;
+                    actualCircleRadius = circleRadius;
+                    actualBoxWidth = boxWidth;
+                    actualBoxHeight = boxHeight;
+                    actualTextSize = textSize;
+                    actualStrokeWidth = strokeWidth;
+                    actualLineWidth = lineWidth;
                 }
                 else
                 {
                     // Для отображения на экране преобразуем координаты фото в экранные
-                    position = transformMatrix.MapPoint(mark.PhotoPosition);
+                    circlePosition = transformMatrix.MapPoint(mark.CirclePosition);
+                    boxPosition = transformMatrix.MapPoint(mark.BoxPosition);
+
+                    // Учитываем масштаб для отображения на экране
+                    actualCircleRadius = circleRadius * scale;
+                    actualBoxWidth = boxWidth * scale;
+                    actualBoxHeight = boxHeight * scale;
+                    actualTextSize = textSize * scale;
+                    actualStrokeWidth = strokeWidth * scale;
+                    actualLineWidth = lineWidth * scale;
                 }
 
-                // Рисуем кружок
+                // 1. Рисуем кружок
                 using (var paint = new SKPaint
                 {
                     Style = SKPaintStyle.Fill,
@@ -465,52 +531,91 @@ namespace MarkApp
                     IsAntialias = true
                 })
                 {
-                    if (forExport)
-                    {
-                        canvas.DrawCircle(position, circleRadius, paint);
-                    }
-                    else
-                    {
-                        // Учитываем масштаб для отображения на экране
-                        canvas.DrawCircle(position, circleRadius * scale, paint);
-                    }
+                    canvas.DrawCircle(circlePosition, actualCircleRadius, paint);
                 }
 
-                // Рисуем границу кружка
                 using (var paint = new SKPaint
                 {
                     Style = SKPaintStyle.Stroke,
                     Color = SKColors.Red,
-                    StrokeWidth = forExport ? strokeWidth : strokeWidth * scale,
+                    StrokeWidth = actualStrokeWidth,
                     IsAntialias = true
                 })
                 {
-                    if (forExport)
-                    {
-                        canvas.DrawCircle(position, circleRadius, paint);
-                    }
-                    else
-                    {
-                        canvas.DrawCircle(position, circleRadius * scale, paint);
-                    }
+                    canvas.DrawCircle(circlePosition, actualCircleRadius, paint);
                 }
 
-                // Рисуем номер метки
+                // 2. Рисуем прямоугольник с текстом
+                var rect = new SKRect(
+                    boxPosition.X - actualBoxWidth / 2,
+                    boxPosition.Y - actualBoxHeight / 2,
+                    boxPosition.X + actualBoxWidth / 2,
+                    boxPosition.Y + actualBoxHeight / 2);
+
                 using (var paint = new SKPaint
                 {
-                    Color = SKColors.White,
-                    TextSize = forExport ? textSize : textSize * scale,
+                    Style = SKPaintStyle.Fill,
+                    Color = new SKColor(200, 200, 200, 230), // Светло-серый с небольшой прозрачностью
+                    IsAntialias = true
+                })
+                {
+                    canvas.DrawRect(rect, paint);
+                }
+
+                using (var paint = new SKPaint
+                {
+                    Style = SKPaintStyle.Stroke,
+                    Color = SKColors.Black,
+                    StrokeWidth = actualStrokeWidth,
+                    IsAntialias = true
+                })
+                {
+                    canvas.DrawRect(rect, paint);
+                }
+
+                // Рисуем номер внутри прямоугольника
+                using (var paint = new SKPaint
+                {
+                    Color = SKColors.Black,
+                    TextSize = actualTextSize,
                     IsAntialias = true,
                     TextAlign = SKTextAlign.Center
                 })
                 {
-                    float verticalOffset = forExport ? textSize / 3 : (textSize * scale) / 3;
                     canvas.DrawText(mark.Number.ToString(),
-                                    position.X,
-                                    position.Y + verticalOffset,
+                                    boxPosition.X,
+                                    boxPosition.Y + actualTextSize / 3, // Корректировка для центрирования
                                     paint);
                 }
+
+                // 3. Рисуем соединительную линию между кружком и ближайшим углом прямоугольника
+                using (var paint = new SKPaint
+                {
+                    Style = SKPaintStyle.Stroke,
+                    Color = SKColors.Black,
+                    StrokeWidth = actualLineWidth,
+                    IsAntialias = true
+                })
+                {
+                    // Определяем ближайший к кружку угол прямоугольника
+                    SKPoint nearestCorner = GetNearestBoxCorner(circlePosition, boxPosition, actualBoxWidth, actualBoxHeight);
+                    canvas.DrawLine(circlePosition, nearestCorner, paint);
+                }
             }
+        }
+
+        // Метод для определения ближайшего угла прямоугольника к точке круга
+        private SKPoint GetNearestBoxCorner(SKPoint circlePosition, SKPoint boxPosition, float boxWidth, float boxHeight)
+        {
+            // Определяем, в каком квадранте относительно центра прямоугольника находится кружок
+            bool isCircleRightOfBox = circlePosition.X > boxPosition.X;
+            bool isCircleBelowBox = circlePosition.Y > boxPosition.Y;
+
+            // Выбираем соответствующий угол
+            float cornerX = boxPosition.X + (isCircleRightOfBox ? 1 : -1) * (boxWidth / 2);
+            float cornerY = boxPosition.Y + (isCircleBelowBox ? 1 : -1) * (boxHeight / 2);
+
+            return new SKPoint(cornerX, cornerY);
         }
 
         private SKPoint ConvertToPhotoCoordinates(SKPoint viewPoint)
@@ -553,7 +658,7 @@ namespace MarkApp
             e.Handled = true;
         }
 
-        private void HandleMarkModeTouch(SKTouchEventArgs e)
+        private async void HandleMarkModeTouch(SKTouchEventArgs e)
         {
             if (e.ActionType == SKTouchAction.Released)
             {
@@ -563,14 +668,59 @@ namespace MarkApp
                 // Проверяем, находится ли точка в пределах фотографии
                 if (IsPointInsidePhoto(photoPoint))
                 {
-                    // Одно касание создает метку с номером
+                    if (!isWaitingForSecondPoint)
+                    {
+                        // Первое касание - сохраняем первую точку и ждем второго касания
+                        firstPoint = photoPoint;
+                        isWaitingForSecondPoint = true;
+                        canvasView.InvalidateSurface();
+                    }
+                    else
+                    {
+                        // Второе касание - запрашиваем у пользователя номер
+                        isWaitingForSecondPoint = false;
+                        await PromptForMarkNumber(photoPoint);
+                    }
+                }
+            }
+        }
+
+        private async Task PromptForMarkNumber(SKPoint secondPoint)
+        {
+            try
+            {
+                string result = await DisplayPromptAsync("Ввод номера", "Введите номер (от 0 до 999):",
+                    initialValue: "0", maxLength: 3, keyboard: Keyboard.Numeric);
+
+                if (result != null && int.TryParse(result, out int number) && number >= 0 && number <= 999)
+                {
+                    // Создаем новую метку
                     marks.Add(new Mark
                     {
-                        PhotoPosition = photoPoint,  // Сохраняем позицию в координатах фото
-                        Number = currentMarkNumber++
+                        CirclePosition = firstPoint,
+                        BoxPosition = secondPoint,
+                        Number = number
                     });
+
                     canvasView.InvalidateSurface();
                 }
+                else if (result != null)
+                {
+                    // Некорректный ввод, показываем предупреждение
+                    await DisplayAlert("Ошибка", "Введите число от 0 до 999", "OK");
+                    // Повторный запрос
+                    await PromptForMarkNumber(secondPoint);
+                }
+                else
+                {
+                    // Пользователь отменил ввод, отменяем всю метку
+                    canvasView.InvalidateSurface();
+                }
+            }
+            catch (Exception ex)
+            {
+                await DisplayAlert("Ошибка", $"Произошла ошибка: {ex.Message}", "OK");
+                canvasView.InvalidateSurface();
             }
         }
 
@@ -679,18 +829,27 @@ namespace MarkApp
         private void OnToggleMarkModeClicked(object sender, EventArgs e)
         {
             isMarkMode = !isMarkMode;
+            if (!isMarkMode)
+            {
+                // При выходе из режима меток, сбрасываем состояние ожидания
+                isWaitingForSecondPoint = false;
+            }
             toggleMarkModeButton.Text = isMarkMode ? "Режим просмотра" : "Режим меток";
+            canvasView.InvalidateSurface();
         }
 
         private void OnUndoClicked(object sender, EventArgs e)
         {
-            if (marks.Count > 0)
+            if (isWaitingForSecondPoint)
             {
-                // Удаляем последнюю метку и уменьшаем счетчик
+                // Если ожидаем вторую точку, отменяем текущую операцию
+                isWaitingForSecondPoint = false;
+                canvasView.InvalidateSurface();
+            }
+            else if (marks.Count > 0)
+            {
+                // Удаляем последнюю метку
                 marks.RemoveAt(marks.Count - 1);
-                if (currentMarkNumber > 1)
-                    currentMarkNumber--;
-
                 canvasView.InvalidateSurface();
             }
         }
