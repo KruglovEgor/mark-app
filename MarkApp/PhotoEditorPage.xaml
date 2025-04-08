@@ -8,12 +8,12 @@
     <Grid RowDefinitions="Auto,*,Auto">
         <!-- Верхняя панель инструментов -->
         <Grid Grid.Row="0" ColumnDefinitions="*,*,*" Padding="10">
-            <Button x:Name="pickPhotoButton" Text="Открыть фото" 
+            <Button x:Name="pickPhotoButton" Text="Открыть" 
                     Clicked="OnPickPhotoClicked" 
                     HorizontalOptions="Fill" 
                     Grid.Column="0" />
             
-            <Button x:Name="toggleMarkModeButton" Text="Режим меток" 
+            <Button x:Name="toggleMarkModeButton" Text="Метки" 
                     Clicked="OnToggleMarkModeClicked" 
                     HorizontalOptions="Fill" 
                     Grid.Column="1" />
@@ -42,13 +42,14 @@
                 
                 <!-- Информационный текст при отсутствии фото -->
                 <Label x:Name="noPhotoLabel" 
-                     Text="Нажмите 'Открыть фото' для начала работы" 
+                     Text="Нажмите 'Открыть' для начала работы" 
                      HorizontalOptions="Center" 
                      VerticalOptions="Center"
+                     HorizontalTextAlignment="Center"
                      IsVisible="True" />
             </Grid>
             
-            <!-- Вертикальный слайдер для масштабирования (повернутый на 90 градусов) -->
+            <!-- Вертикальный слайдер для масштабирования -->
             <Grid Grid.Column="1" WidthRequest="60" Padding="5,0,10,0">
                 <VerticalStackLayout VerticalOptions="Center">
                     <Label Text="+" FontSize="18" HorizontalOptions="Center" />

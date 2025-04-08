@@ -834,7 +834,9 @@ namespace MarkApp
                 // При выходе из режима меток, сбрасываем состояние ожидания
                 isWaitingForSecondPoint = false;
             }
-            toggleMarkModeButton.Text = isMarkMode ? "Режим просмотра" : "Режим меток";
+
+            // Обновлено: новые сокращенные названия
+            toggleMarkModeButton.Text = isMarkMode ? "Просмотр" : "Метки";
             canvasView.InvalidateSurface();
         }
 
